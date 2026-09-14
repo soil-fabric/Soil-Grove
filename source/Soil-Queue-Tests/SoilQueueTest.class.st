@@ -105,6 +105,19 @@ SoilQueueTest >> testAFinishedWorkUnitLeavesTheOrdering [
 ]
 
 { #category : #tests }
+SoilQueueTest >> testAStepThatDidSomethingSaysThereMayBeMore [
+	"otherwise a queue works one entry and then waits for a signal that nobody is going to
+	send, because the one that put the second entry in was spent on the first"
+
+	| queue |
+	self put: (self entryDueIn: 0 seconds).
+	self put: (self entryDueIn: 0 seconds).
+	queue := self queue.
+	queue runStep.
+	self assert: queue hasPendingWork
+]
+
+{ #category : #tests }
 SoilQueueTest >> testATakenEntryComesBackAfterItIsReleased [
 
 	| queue txn key again |
@@ -139,6 +152,12 @@ SoilQueueTest >> testAWorkUnitClaimsBeforeItWorks [
 ]
 
 { #category : #tests }
+SoilQueueTest >> testAnEmptyQueueHasNothingDue [
+
+	self assert: self queue nextDueTime equals: nil
+]
+
+{ #category : #tests }
 SoilQueueTest >> testAnEntryIsHandedOutOnlyOnce [
 	"the whole reason the coordinating half is one object in memory"
 
@@ -165,6 +184,39 @@ SoilQueueTest >> testNothingDueLeavesTheStepWithNothingTaken [
 	queue := self queue.
 	queue runStep.
 	self deny: (queue isHolding: key)
+]
+
+{ #category : #tests }
+SoilQueueTest >> testOpeningFindsWorkThatWasLeftLyingAround [
+	"the signal that would have said so came before the restart and is gone with it"
+
+	| queue txn |
+	self put: (self entryDueIn: 0 seconds).
+	queue := self queue.
+	self deny: queue hasPendingWork.
+
+	txn := soil newTransaction.
+	[ queue prepareIn: txn ] ensure: [ txn abort ].
+	self assert: queue hasPendingWork
+]
+
+{ #category : #tests }
+SoilQueueTest >> testSomethingDueLaterAnswersWhen [
+	"so an embedder can sleep exactly that long instead of asking again"
+
+	| due |
+	due := DateAndTime now + 1 hour.
+	self put: ((self entryDueIn: 0 seconds) eligibleAt: due; yourself).
+	self assert: self queue nextDueTime equals: due
+]
+
+{ #category : #tests }
+SoilQueueTest >> testSomethingDueNowAnswersNow [
+
+	| asked |
+	self put: (self entryDueIn: 0 seconds).
+	asked := DateAndTime now.
+	self assert: self queue nextDueTime >= asked
 ]
 
 { #category : #tests }

@@ -113,6 +113,30 @@ SoilQueue >> name: aSymbol [
 	name := aSymbol
 ]
 
+{ #category : #accessing }
+SoilQueue >> nextDueTime [
+	"when something of mine may run next, or nil when I hold nothing. For an embedder's
+	external wakeup, and for its decision whether the database is quiet enough to close."
+
+	^ self withTransactionDo: [ :txn |
+		(self descriptionIn: txn) nextDueTimeAt: DateAndTime now ]
+]
+
+{ #category : #running }
+SoilQueue >> prepareIn: aTransaction [
+	"the push at opening. Work that was left lying around has to be found without anyone
+	signalling for it: the signal that would have said so came before the restart and is
+	gone with it.
+
+	This only raises the flag; the first work unit does the rest. An entry that is not due
+	yet raises it too, and the step that finds nothing due then costs one turn -- what it
+	does not do yet is sleep until that entry becomes due. That is the dispatcher's wakeup
+	time and it is not built."
+
+	((self descriptionIn: aTransaction) nextDueTimeAt: DateAndTime now)
+		ifNotNil: [ self noteWork ]
+]
+
 { #category : #recovery }
 SoilQueue >> recover: aKey [
 	"give one orphaned entry back, the way its own semantics say.
@@ -181,7 +205,11 @@ SoilQueue >> runStep [
 	key ifNil: [ ^ self ].
 	[ self claim: key.
 	  self work: key ]
-		ensure: [ self release: key ]
+		ensure: [ self release: key ].
+	"one entry is one work unit, and there may be more behind it. Saying so costs at worst
+	one turn that finds nothing, and that beats a queue that stops after one entry and waits
+	for a signal nobody is going to send."
+	self noteWork
 ]
 
 { #category : #accessing }

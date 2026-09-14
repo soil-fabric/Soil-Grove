@@ -183,6 +183,22 @@ SoilQueueDescription >> nextDueAt: aDateAndTime skipping: aCollection ifNone: aB
 	^ aBlock cull: nil
 ]
 
+{ #category : #accessing }
+SoilQueueDescription >> nextDueTimeAt: aDateAndTime [
+	"when the first entry of my section may run: aDateAndTime itself when one is already
+	due, the time of the earliest one when none is, and nil when the section holds nothing.
+
+	One of the two questions an embedder asks a queue. It answers a time rather than a key
+	because the asker is not going to work on it -- it wants to know how long it may sleep,
+	or whether the database is quiet enough to close."
+
+	self
+		nextDueAt: aDateAndTime
+		skipping: #(  )
+		ifNone: [ :time | ^ time ].
+	^ aDateAndTime
+]
+
 { #category : #printing }
 SoilQueueDescription >> printOn: aStream [
 
