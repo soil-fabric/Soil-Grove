@@ -15,6 +15,12 @@ the whole graph together with me.
 I carry no field for my queue. Which queue I am on follows from the queue I lie in,
 and a second source for the same fact is a duplicate that can disagree.
 
+Two of my fields end up in my key rather than only on me. #eligibleAt is the sort
+value, and it is a lower bound and not an appointment -- I am allowed to run from then
+on, not scheduled for then, because a rate at the outlet can hold me back arbitrarily
+long. #id is what makes the key unique, which the index needs: moving a key is refused
+on an index with duplicate keys, and moving a key is what backoff does.
+
 My resumption semantics answer the one question an abort leaves open, and the queue
 cannot answer it for me: *what holds afterwards*. An image can crash at any moment and
 a rolling release interrupts work as a matter of routine, so every entry has to say
@@ -34,18 +40,26 @@ Class {
 	#instVars : [
 		'state',
 		'target',
+		'eligibleAt',
 		'claimedAt',
-		'resumption'
+		'resumption',
+		'id'
 	],
 	#category : #'Soil-Queue'
 }
 
 { #category : #accessing }
-SoilQueueEntry class >> resumption [
-	"which of the three resumption semantics my instances follow -- see my class comment
-	for why there is no default here"
+SoilQueueEntry class >> newId [
+	"eight bytes that make my key unique among the entries that share my due time.
 
-	^ self subclassResponsibility
+	Drawn at random rather than counted up. A counter would have to live somewhere that
+	every enqueue writes to, and under MVCC a structure every writer touches is exactly
+	where write conflicts come from -- the one thing the design goes out of its way to
+	avoid. What it costs is order among entries of the very same millisecond, which the
+	queue never promised: it hands out the oldest *due* entry, and due times are what it
+	orders by."
+
+	^ (UUID new asInteger \\ (256 raisedTo: 8)) asByteArrayOfSize: 8
 ]
 
 { #category : #'instance creation' }
@@ -54,6 +68,14 @@ SoilQueueEntry class >> on: anObject [
 	^ self new
 		target: anObject;
 		yourself
+]
+
+{ #category : #accessing }
+SoilQueueEntry class >> resumption [
+	"which of the three resumption semantics my instances follow -- see my class comment
+	for why there is no default here"
+
+	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
@@ -102,12 +124,38 @@ SoilQueueEntry >> compensateIn: aTransaction [
 	^ self subclassResponsibility
 ]
 
+{ #category : #accessing }
+SoilQueueEntry >> eligibleAt [
+	"the time from which I may run. A lower bound, not an appointment: a rate at the outlet
+	can hold me back arbitrarily long after it, and that is not a broken promise, because
+	no promise about a point in time was made"
+
+	^ eligibleAt
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> eligibleAt: aDateAndTime [
+	"whoever changes this on an entry that already lies in a queue has to move its key with
+	it, because the key is what sorts by this"
+
+	eligibleAt := aDateAndTime
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> id [
+	"eight bytes that tell me apart from the other entries that are due at the same time"
+
+	^ id
+]
+
 { #category : #initialization }
 SoilQueueEntry >> initialize [
 
 	super initialize.
 	state := #pending.
-	resumption := self class resumption
+	resumption := self class resumption.
+	eligibleAt := DateAndTime now.
+	id := self class newId
 ]
 
 { #category : #testing }
