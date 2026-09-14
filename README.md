@@ -20,3 +20,8 @@ does not drag the suite in, and loading the suite does not force you to take
 all of it.
 
 Code lives in `source/`.
+
+`#failOnZeroTests : false` is set in `.smalltalk.ston` only because the packages
+are still empty; CI would otherwise fail a build that has nothing to run yet.
+**Take it out with the first test**, or a later build that finds no tests at all
+— a renamed package, a wrong baseline group — will pass in silence.
