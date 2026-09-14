@@ -27,7 +27,8 @@ Class {
 	#instVars : [
 		'name',
 		'strategy',
-		'format'
+		'format',
+		'deadLetters'
 	],
 	#category : #'Soil-Queue'
 }
@@ -73,6 +74,30 @@ SoilQueueDescription >> appendKeyPartsFor: anEntry on: aWriteStream [
 ]
 
 { #category : #accessing }
+SoilQueueDescription >> deadLetter: aKey [
+	"park an entry that could not be worked on at all, and take it out of the ordering.
+
+	Put first and removed second, so that an abort in between leaves it where it was rather
+	than nowhere. It keeps its key: it is the same entry, only somewhere else."
+
+	| entry |
+	entry := self entryAt: aKey.
+	entry markDeadLetter.
+	deadLetters at: aKey put: entry.
+	self removeKey: aKey.
+	^ entry
+]
+
+{ #category : #enumerating }
+SoilQueueDescription >> deadLettersDo: aBlock [
+	"the parked entries with their keys. Nobody is woken for these -- they are here to be
+	looked at"
+
+	deadLetters newIterator associationsDo: [ :each |
+		aBlock value: each key value: each value ]
+]
+
+{ #category : #accessing }
 SoilQueueDescription >> entryAt: aKey [
 
 	^ strategy index at: aKey
@@ -94,9 +119,19 @@ SoilQueueDescription >> format [
 SoilQueueDescription >> initializeFrom: aTransaction [
 	"the index is a cluster root of its own. Two things follow, and both are wanted: it is
 	not copied into my cluster, and two queues that share one index share one object
-	instead of each getting a copy that overwrites the other's"
+	instead of each getting a copy that overwrites the other's.
 
-	strategy makeIndexRootIn: aTransaction
+	The dead letters get a second index, never shared. Out of the ordering, so that a
+	parked entry is not stepped over on every scan for work, and still in the store, so
+	that it can be found and looked at -- work that disappears without a trace is worse
+	than work that sits there unfinished."
+
+	strategy makeIndexRootIn: aTransaction.
+	deadLetters := (SoilIndexedDictionary newWithBackend: strategy backend)
+		keySize: strategy range keySize;
+		maxLevel: 16;
+		yourself.
+	aTransaction makeRoot: deadLetters
 ]
 
 { #category : #'instance creation' }
