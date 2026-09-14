@@ -6,6 +6,5 @@ SmalltalkCISpec {
       #directory : 'source',
       #onConflict : #useIncoming
     }
-  ],
-  #failOnZeroTests : false
+  ]
 }
