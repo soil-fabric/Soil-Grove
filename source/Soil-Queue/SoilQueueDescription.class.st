@@ -144,18 +144,16 @@ SoilQueueDescription >> nextDueAt: aDateAndTime skipping: aCollection ifNone: aB
 	has to rather than come back and ask again.
 
 	The scan jumps rather than steps: to the start of my section, then past each key it
-	looked at. Two guards end it, and both are needed. The range says where the section
-	stops, because the index has no idea it is shared. And asked for a key behind
-	everything the index holds, the positioning call answers its *last* key rather than
-	nil -- before the key asked for rather than after it -- so a loop that ends only on nil
-	would read that entry again and again."
+	looked at. What ends it is the range, which says where the section stops, because the
+	index has no idea that it is shared. Past the last key of the index the positioning
+	call answers nil, so that end takes care of itself."
 
 	| iterator range scanKey found |
 	range := strategy range.
 	iterator := strategy newIterator.
 	scanKey := range firstIndexKey.
 	[ found := iterator nextKeyCloseTo: scanKey.
-	  found notNil and: [ found >= scanKey and: [ range includesKey: found ] ] ]
+	  found notNil and: [ range includesKey: found ] ]
 		whileTrue: [
 			(aCollection includes: found)
 				ifTrue: [ scanKey := found + 1 ]
