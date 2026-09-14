@@ -30,6 +30,10 @@ which of the three it is --
 	#repeating     run again from the start; idempotence is a promise, not an assumption
 	#compensating  clean up what the aborted attempt left behind, then start over
 
+Waiting is courtesy, not a guarantee. A maintenance run can let entries finish; a crash
+cannot. Waiting lowers the number of repetitions -- the correctness is in the three
+semantics above and nowhere else.
+
 There is no default. Each of the three demands something different of the subclass,
 and a default would hand out one of those demands silently. The compensating case is
 the one that gets forgotten, and it produces most of the bugs.
@@ -43,7 +47,8 @@ Class {
 		'eligibleAt',
 		'claimedAt',
 		'resumption',
-		'id'
+		'id',
+		'progress'
 	],
 	#category : #'Soil-Queue'
 }
@@ -224,6 +229,26 @@ SoilQueueEntry >> printOn: aStream [
 
 	super printOn: aStream.
 	aStream << ' ' << state
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> progress [
+	"where a resumable unit of work had got to, or nil when it never started.
+
+	Only for entries that have no state machine of their own. A target that knows its own
+	progress is the better place for it, and a second field beside it would be a duplicate
+	that can disagree -- the wrapper then only says 'not finished', not where it stands."
+
+	^ progress
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> progress: anObject [
+	"set this *after* the effect it stands for, never before. A crash between the effect
+	and the commit then costs a repetition; the other order loses the effect entirely, and
+	the queue promises at least once rather than exactly once."
+
+	progress := anObject
 ]
 
 { #category : #accessing }

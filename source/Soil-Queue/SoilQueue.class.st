@@ -27,7 +27,8 @@ Class {
 	#instVars : [
 		'name',
 		'mutex',
-		'inFlight'
+		'inFlight',
+		'recovered'
 	],
 	#category : #'Soil-Queue'
 }
@@ -38,7 +39,7 @@ SoilQueue class >> soilTransientInstVars [
 	superclass's rather than adding to it, and a forgotten one would drag a process or a
 	semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight )
+	^ #( supervisor process workSignal runStrategy mutex inFlight recovered )
 ]
 
 { #category : #adding }
@@ -85,7 +86,8 @@ SoilQueue >> initialize [
 
 	super initialize.
 	mutex := Mutex new.
-	inFlight := Set new
+	inFlight := Set new.
+	recovered := false
 ]
 
 { #category : #testing }
@@ -111,6 +113,49 @@ SoilQueue >> name: aSymbol [
 	name := aSymbol
 ]
 
+{ #category : #recovery }
+SoilQueue >> recover: aKey [
+	"give one orphaned entry back, the way its own semantics say.
+
+	Its own transaction, so that one entry whose compensation throws does not keep the
+	others from coming back. A compensating entry that throws here stays claimed and is
+	tried again at the next pass, which is the right answer while the cleanup step has no
+	dead-lettering of its own."
+
+	self withTransactionDo: [ :txn |
+		| entry |
+		entry := (self descriptionIn: txn) entryAt: aKey.
+		entry isClaimed ifFalse: [ ^ self ].
+		entry resumption == #compensating ifTrue: [ entry compensateIn: txn ].
+		entry releaseClaim.
+		txn commit ]
+]
+
+{ #category : #recovery }
+SoilQueue >> recoverOrphanedClaims [
+	"the push at opening: an entry that says claimed and that nobody is holding was in the
+	middle of something when the image went away.
+
+	Found over the entries and not over the index, because a claim does not change a key --
+	the ordering cannot tell the two apart. What happens then is the entry's business and
+	not mine: a continuing one keeps its progress, a repeating one starts over on its
+	promise of idempotence, a compensating one is cleaned up first. That is the whole
+	reason the semantics sit on the entry rather than in the queue.
+
+	Once per lifetime. Everything claimed after this is claimed by a worker of mine, and
+	#isHolding: says so."
+
+	| orphans |
+	recovered ifTrue: [ ^ self ].
+	recovered := true.
+	orphans := OrderedCollection new.
+	self withTransactionDo: [ :txn |
+		(self descriptionIn: txn) keysAndEntriesDo: [ :key :entry |
+			(entry isClaimed and: [ (self isHolding: key) not ])
+				ifTrue: [ orphans add: key ] ] ].
+	orphans do: [ :each | self recover: each ]
+]
+
 { #category : #working }
 SoilQueue >> release: aKey [
 	"the entry is no longer out with anyone, whatever became of it"
@@ -130,6 +175,7 @@ SoilQueue >> runStep [
 	image restarts."
 
 	| key |
+	self recoverOrphanedClaims.
 	key := self withTransactionDo: [ :txn |
 		self assignNextDueAt: DateAndTime now in: txn ifNone: [ :time | nil ] ].
 	key ifNil: [ ^ self ].

@@ -137,10 +137,13 @@ SoilQueueEntryTest >> testClaimingTwiceIsRefused [
 { #category : #tests }
 SoilQueueEntryTest >> testCompensationIsTheSubclassesToImplement [
 
-	| entry |
-	entry := SoilQueueTestCompensatingEntry on: 'work'.
+	| target entry |
+	target := SoilQueueTestTarget new.
+	target addEffect: #ran.
+	entry := SoilQueueTestCompensatingEntry on: target.
 	entry compensateIn: nil.
-	self assert: entry compensationCount equals: 1
+	self assert: target effects equals: #(  ).
+	self assert: target compensations equals: #( 1 )
 ]
 
 { #category : #tests }
