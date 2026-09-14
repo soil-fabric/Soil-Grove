@@ -164,6 +164,25 @@ SoilQueueEntry >> initialize [
 ]
 
 { #category : #testing }
+SoilQueueEntry >> isReadyToRunIn: aTransaction [
+	"whether the queue can get to my work at all. Asked before the work unit runs, and the
+	answer separates two things that look alike from outside: a wrapper that reads but
+	points at nothing is infrastructure and there is no retrying it -- the answer is the
+	dead letter. An error out of the work unit itself never comes through here; that one
+	belongs to the work unit and its own classification.
+
+	The default resolves the target, because that is the part that can be gone. Resolving
+	has to be asked for: a proxy answers #isNil, #notNil and even #class without touching
+	the store, so none of those would notice. A target that was never set is not the same
+	as one that is gone, and it passes."
+
+	^ [ target isSoilProxy ifTrue: [ target soilRealObject ].
+	  true ]
+		on: Error
+		do: [ :anError | false ]
+]
+
+{ #category : #testing }
 SoilQueueEntry >> isClaimed [
 
 	^ state == #claimed

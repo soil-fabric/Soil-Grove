@@ -56,6 +56,15 @@ SoilQueueStrategy class >> ownIndexWithBackend: anIndexClass keySize: keySizeInB
 ]
 
 { #category : #accessing }
+SoilQueueStrategy >> backend [
+	"the kind of index my entries lie on, in its durable form. Asked of the persistent
+	index and not of the one in hand: a materialized index is wrapped copy-on-write per
+	transaction, and that wrapper cannot be used to build a new index with."
+
+	^ index persistentIndex class
+]
+
+{ #category : #accessing }
 SoilQueueStrategy >> index [
 
 	^ index

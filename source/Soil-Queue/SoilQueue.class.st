@@ -226,6 +226,11 @@ SoilQueue >> work: aKey [
 	later due time is backoff, and backoff is not part of this stage -- an entry that says
 	it goes on becomes due again immediately, which is correct and merely impatient.
 
+	An entry that is not ready to run never gets as far as its work unit: something it
+	needs is gone, no repetition will bring it back, and it is parked as a dead letter
+	instead. That is infrastructure and is kept apart from failing *at* the work, which is
+	a result and ends in #markDone.
+
 	A thrown work unit discards the whole transaction: the entry stays in the ordering and
 	keeps saying claimed. Booking that as a failed attempt needs a transaction of its own
 	and belongs with retry."
@@ -234,6 +239,11 @@ SoilQueue >> work: aKey [
 		| description entry outcome |
 		description := self descriptionIn: txn.
 		entry := description entryAt: aKey.
+		(entry isReadyToRunIn: txn)
+			ifFalse: [
+				description deadLetter: aKey.
+				txn commit.
+				^ self ].
 		outcome := entry performIn: txn.
 		outcome == #more
 			ifTrue: [ entry releaseClaim ]
