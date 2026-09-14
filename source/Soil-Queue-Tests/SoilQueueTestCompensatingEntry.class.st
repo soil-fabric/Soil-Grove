@@ -1,14 +1,13 @@
 "
 The third resumption semantics, the one that gets forgotten: I cannot simply be run
-again, because an aborted attempt leaves something behind that has to go first. I count
-both, so a test can tell that the cleanup ran and that it ran before the retry.
+again, because an aborted attempt leaves something behind that has to go first.
+
+My cleanup takes the last effect off my target and notes how many it found there. A test
+can then see both that it ran and that it ran *before* the fresh attempt.
 "
 Class {
 	#name : #SoilQueueTestCompensatingEntry,
-	#superclass : #SoilQueueTestEntry,
-	#instVars : [
-		'compensationCount'
-	],
+	#superclass : #SoilQueueEntry,
 	#category : #'Soil-Queue-Tests'
 }
 
@@ -18,21 +17,15 @@ SoilQueueTestCompensatingEntry class >> resumption [
 	^ #compensating
 ]
 
-{ #category : #accessing }
-SoilQueueTestCompensatingEntry >> compensationCount [
-
-	^ compensationCount
-]
-
 { #category : #working }
 SoilQueueTestCompensatingEntry >> compensateIn: aTransaction [
 
-	compensationCount := compensationCount + 1
+	self target undoLastEffect
 ]
 
-{ #category : #initialization }
-SoilQueueTestCompensatingEntry >> initialize [
+{ #category : #working }
+SoilQueueTestCompensatingEntry >> performIn: aTransaction [
 
-	super initialize.
-	compensationCount := 0
+	self target addEffect: #ran.
+	^ #finished
 ]

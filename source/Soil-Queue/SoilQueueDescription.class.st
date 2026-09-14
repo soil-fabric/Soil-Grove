@@ -119,6 +119,24 @@ SoilQueueDescription >> keyFor: anEntry [
 		self appendKeyPartsFor: anEntry on: parts ])
 ]
 
+{ #category : #enumerating }
+SoilQueueDescription >> keysAndEntriesDo: aBlock [
+	"every entry of my section with its key, in key order.
+
+	The only reader of this is the recovery pass, and it reads every entry because that is
+	where the answer is: an orphaned claim cannot be found over the index, since a claim
+	does not change the key. Selecting work does not come this way -- it reads one entry
+	and stops."
+
+	| iterator scanKey found |
+	iterator := strategy newIterator.
+	scanKey := strategy range firstIndexKey.
+	[ found := iterator nextKeyCloseTo: scanKey.
+	  found notNil and: [ strategy range includesKey: found ] ] whileTrue: [
+		aBlock value: found value: (iterator at: found).
+		scanKey := found + 1 ]
+]
+
 { #category : #accessing }
 SoilQueueDescription >> name [
 
