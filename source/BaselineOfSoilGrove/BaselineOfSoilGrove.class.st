@@ -25,5 +25,5 @@ BaselineOfSoilGrove >> soil: spec [
 
 	spec baseline: 'Soil' with: [
 		spec
-			repository: 'github://ApptiveGrid/Soil:2aaab3f0a52dda60e57b366649c9023c9495a84f/src' ]
+			repository: 'github://ApptiveGrid/Soil:eadf1ed851e9114a2cc94d3c4fe97d72f1634205/src' ]
 ]
