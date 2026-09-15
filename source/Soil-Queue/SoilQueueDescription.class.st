@@ -28,7 +28,8 @@ Class {
 		'name',
 		'strategy',
 		'format',
-		'deadLetters'
+		'deadLetters',
+		'workerLimit'
 	],
 	#category : #'Soil-Queue'
 }
@@ -95,6 +96,27 @@ SoilQueueDescription >> deadLettersDo: aBlock [
 
 	deadLetters newIterator associationsDo: [ :each |
 		aBlock value: each key value: each value ]
+]
+
+{ #category : #accessing }
+SoilQueueDescription >> dueCountAt: aDateAndTime upTo: aLimit [
+	"how many entries are due, counted no further than aLimit.
+
+	The number is only ever used to decide how many workers to have, so counting past the
+	limit would buy nothing. The walk stops at the first entry that is not due either,
+	because the ordering is by due time and nothing behind it can be due.
+
+	Only pending entries count. One that says claimed is with a worker already, or waiting
+	for the recovery pass, and in neither case does it call for another worker."
+
+	| count |
+	count := 0.
+	self keysAndEntriesDo: [ :key :entry |
+		entry eligibleAt > aDateAndTime ifTrue: [ ^ count ].
+		entry isPending ifTrue: [
+			count := count + 1.
+			count >= aLimit ifTrue: [ ^ count ] ] ].
+	^ count
 ]
 
 { #category : #accessing }
@@ -199,7 +221,12 @@ SoilQueueDescription >> nextDueAt: aDateAndTime skipping: aCollection ifNone: aB
 	The scan jumps rather than steps: to the start of my section, then past each key it
 	looked at. What ends it is the range, which says where the section stops, because the
 	index has no idea that it is shared. Past the last key of the index the positioning
-	call answers nil, so that end takes care of itself."
+	call answers nil, so that end takes care of itself.
+
+	Only pending entries are handed out. An entry that says claimed belongs to a worker, or
+	to the recovery pass if no worker holds it -- and it stays in the ordering either way,
+	because a claim does not change a key. Without this a work unit that throws would be
+	handed straight back to the next worker, for ever."
 
 	| iterator range scanKey found |
 	range := strategy range.
@@ -213,8 +240,11 @@ SoilQueueDescription >> nextDueAt: aDateAndTime skipping: aCollection ifNone: aB
 				ifFalse: [
 					| entry |
 					entry := iterator at: found.
-					entry eligibleAt <= aDateAndTime ifTrue: [ ^ found ].
-					^ aBlock cull: entry eligibleAt ] ].
+					entry isPending
+						ifFalse: [ scanKey := found + 1 ]
+						ifTrue: [
+							entry eligibleAt <= aDateAndTime ifTrue: [ ^ found ].
+							^ aBlock cull: entry eligibleAt ] ] ].
 	^ aBlock cull: nil
 ]
 
@@ -261,4 +291,21 @@ SoilQueueDescription >> setName: aSymbol strategy: aStrategy format: aFormat [
 SoilQueueDescription >> strategy [
 
 	^ strategy
+]
+
+{ #category : #accessing }
+SoilQueueDescription >> workerLimit [
+	"how many workers may run at once. One unless the embedder says otherwise, and that is
+	the cautious direction: in Pharo processes are green threads, so more of them buy
+	overlap during waiting and latency isolation between a long entry and a short one, never
+	throughput. Against a backlog the answer is a different rate, not more workers."
+
+	^ workerLimit ifNil: [ 1 ]
+]
+
+{ #category : #accessing }
+SoilQueueDescription >> workerLimit: anInteger [
+
+	anInteger < 1 ifTrue: [ ^ self error: 'a queue with no worker would never run' ].
+	workerLimit := anInteger
 ]

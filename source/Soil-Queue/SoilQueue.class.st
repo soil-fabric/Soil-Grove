@@ -28,7 +28,8 @@ Class {
 		'name',
 		'mutex',
 		'inFlight',
-		'recovered'
+		'recovered',
+		'workers'
 	],
 	#category : #'Soil-Queue'
 }
@@ -39,7 +40,7 @@ SoilQueue class >> soilTransientInstVars [
 	superclass's rather than adding to it, and a forgotten one would drag a process or a
 	semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight recovered )
+	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers )
 ]
 
 { #category : #adding }
@@ -48,6 +49,21 @@ SoilQueue >> add: anEntry in: aTransaction [
 	get in each other's way here, because each entry gets a key of its own"
 
 	^ (self descriptionIn: aTransaction) add: anEntry
+]
+
+{ #category : #working }
+SoilQueue >> assignNext [
+	"what a worker asks for, and the only way it gets an entry -- it never looks at the
+	ordering itself.
+
+	nil means 'nothing for you', and a worker that hears it ends. That is also how a stop
+	arrives: the queue stops handing out, and the workers run dry by themselves. Nobody
+	suspends a process from outside, because a process stopped inside a transaction leaves
+	half-written state and held locks behind."
+
+	self shouldStop ifTrue: [ ^ nil ].
+	^ self withTransactionDo: [ :txn |
+		self assignNextDueAt: DateAndTime now in: txn ifNone: [ :time | nil ] ]
 ]
 
 { #category : #working }
@@ -69,6 +85,15 @@ SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
 	^ key ifNil: [ aBlock cull: nextTime ]
 ]
 
+{ #category : #testing }
+SoilQueue >> basicIsIdle [
+	"not idle while a worker is on something. The embedder reads this to decide whether the
+	database is quiet enough to close, and a worker in the middle of a transaction is the
+	case that decision is about"
+
+	^ super basicIsIdle and: [ mutex critical: [ workers isEmpty ] ]
+]
+
 { #category : #working }
 SoilQueue >> claim: aKey [
 	"step 2 of a work unit: its own short transaction, committed before the work starts.
@@ -81,12 +106,23 @@ SoilQueue >> claim: aKey [
 		txn commit ]
 ]
 
+{ #category : #working }
+SoilQueue >> conflictLimit [
+	"how often the same work unit is tried again after a write conflict before the conflict
+	is treated as an error like any other. Small on purpose: a conflict that survives a few
+	fresh reads is not a conflict any more, it is something that does not resolve, and
+	trying for ever would hide it."
+
+	^ 3
+]
+
 { #category : #initialization }
 SoilQueue >> initialize [
 
 	super initialize.
 	mutex := Mutex new.
 	inFlight := Set new.
+	workers := IdentitySet new.
 	recovered := false
 ]
 
@@ -189,27 +225,15 @@ SoilQueue >> release: aKey [
 
 { #category : #running }
 SoilQueue >> runStep [
-	"one work unit, and its transaction boundaries are the point.
+	"the dispatcher's step, and it does no work itself. One work unit here would block
+	handing out, the wake time and the idle answer along with it, for as long as that unit
+	takes.
 
-	Selecting, claiming and working are three transactions, not one. The claim is
-	committed before the work so that a crash in the middle is visible afterwards. The
-	result and the removal from the ordering are one commit, so the state where the work
-	wants to go on and no entry is left cannot arise. And the release happens whatever
-	happened, or a thrown work unit would take its entry out of circulation until the
-	image restarts."
+	What it decides is how many workers there should be, never who gets what -- that is
+	the queue's own, under the mutex, because that is where competing workers meet."
 
-	| key |
 	self recoverOrphanedClaims.
-	key := self withTransactionDo: [ :txn |
-		self assignNextDueAt: DateAndTime now in: txn ifNone: [ :time | nil ] ].
-	key ifNil: [ ^ self ].
-	[ self claim: key.
-	  self work: key ]
-		ensure: [ self release: key ].
-	"one entry is one work unit, and there may be more behind it. Saying so costs at worst
-	one turn that finds nothing, and that beats a queue that stops after one entry and waits
-	for a signal nobody is going to send."
-	self noteWork
+	self startWorkersForWhatIsDue
 ]
 
 { #category : #accessing }
@@ -218,9 +242,69 @@ SoilQueue >> runStrategyClass [
 	^ SoilSignalRunStrategy
 ]
 
+{ #category : #running }
+SoilQueue >> startWorker [
+
+	| worker |
+	worker := SoilQueueWorker on: self.
+	self workerStarting: worker.
+	worker start
+]
+
+{ #category : #running }
+SoilQueue >> startWorkersForWhatIsDue [
+	"as many workers as there is due work for, up to the limit, and nothing on stock.
+
+	The count stops at the limit and at the first entry that is not due, so the scan costs
+	the same whether ten entries are waiting or ten thousand. The number of waiting entries
+	says nothing about how many workers are needed anyway -- it only says how long the
+	working takes."
+
+	| wanted running |
+	self shouldStop ifTrue: [ ^ self ].
+	wanted := self withTransactionDo: [ :txn |
+		| description |
+		description := self descriptionIn: txn.
+		(description dueCountAt: DateAndTime now upTo: description workerLimit)
+			min: description workerLimit ].
+	running := mutex critical: [ workers size ].
+	(wanted - running) timesRepeat: [ self startWorker ]
+]
+
+{ #category : #stopping }
+SoilQueue >> terminateProcesses [
+	"the hard way out, after the cooperative stop ran out of time. The workers go first:
+	terminating the dispatcher leaves them running, and they are the ones holding entries"
+
+	self workers do: [ :each | each terminate ].
+	super terminateProcesses
+]
+
 { #category : #working }
 SoilQueue >> work: aKey [
-	"step 3: the work unit, and what follows from what it answers, in one commit.
+	"step 3, with the one failure that is neither of the two the entry knows about.
+
+	A write conflict says that the worker was there and the work was fine and it simply did
+	not happen: somebody else committed the same objects first. So the same work unit runs
+	again at once -- no counter, no backoff, and above all no carrying on from the old
+	snapshot. A fresh transaction is what makes the re-read happen, and it is the whole
+	point of starting over rather than committing again."
+
+	| attempts |
+	attempts := 0.
+	[ attempts := attempts + 1.
+	  [ self workOnce: aKey.
+	    true ]
+		on: SoilObjectHasConcurrentChange
+		do: [ :aConflict |
+			attempts >= self conflictLimit ifTrue: [ aConflict pass ].
+			false ] ]
+		whileFalse
+]
+
+{ #category : #working }
+SoilQueue >> workOnce: aKey [
+	"one attempt at the work unit, and what follows from what it answers, in one commit.
 
 	#more leaves the entry where it is and only gives the claim back. Pushing it out to a
 	later due time is backoff, and backoff is not part of this stage -- an entry that says
@@ -251,4 +335,27 @@ SoilQueue >> work: aKey [
 				description removeKey: aKey.
 				entry markDone ].
 		txn commit ]
+]
+
+{ #category : #running }
+SoilQueue >> workerFinished: aWorker [
+	"a worker ends by itself when nothing comes any more, which is also how a stop reaches
+	it: the queue stops handing out and the workers run dry"
+
+	mutex critical: [ workers remove: aWorker ifAbsent: [ nil ] ]
+]
+
+{ #category : #running }
+SoilQueue >> workerStarting: aWorker [
+	"counted from the moment it exists, not from its first entry: the dispatcher asks how
+	many are running before it decides to start another"
+
+	mutex critical: [ workers add: aWorker ]
+]
+
+{ #category : #accessing }
+SoilQueue >> workers [
+	"the workers that are running right now"
+
+	^ mutex critical: [ workers asArray ]
 ]

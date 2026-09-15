@@ -104,8 +104,8 @@ SoilQueueDeadLetterTest >> testADeadLetterIsNotHandedOutAgain [
 
 	| key queue |
 	key := self put: (SoilQueueTestUnreachableEntry on: 'gone').
+	self workOffEverything.
 	queue := self queue.
-	queue runStep.
 
 	self assert: queue nextDueTime equals: nil.
 	self deny: (queue isHolding: key)
@@ -117,7 +117,7 @@ SoilQueueDeadLetterTest >> testADeadLetterIsParkedWhereItCanBeFound [
 
 	| key |
 	key := self put: (SoilQueueTestUnreachableEntry on: 'gone').
-	self queue runStep.
+	self workOffEverything.
 
 	self assert: (self stateOf: key) equals: nil.
 	self assert: self deadLetteredKeys equals: { key -> #deadLetter }
@@ -139,8 +139,7 @@ SoilQueueDeadLetterTest >> testAnEntryBehindADeadLetterStillGetsItsTurn [
 	| gone good |
 	gone := self put: (SoilQueueTestUnreachableEntry on: 'gone').
 	good := self put: (SoilQueueTestRepeatingEntry on: SoilQueueTestTarget new).
-	self queue runStep.
-	self queue runStep.
+	self workOffEverything.
 
 	self assert: (self stateOf: gone) equals: nil.
 	self assert: (self stateOf: good) equals: nil.
@@ -154,8 +153,29 @@ SoilQueueDeadLetterTest >> testAnEntryThatOnlyFailsAtItsWorkIsNotADeadLetter [
 
 	| key |
 	key := self put: (SoilQueueTestRepeatingEntry on: SoilQueueTestTarget new).
-	self queue runStep.
+	self workOffEverything.
 
 	self assert: (self stateOf: key) equals: nil.
 	self assert: self deadLetteredKeys equals: #(  )
+]
+
+{ #category : #helpers }
+SoilQueueDeadLetterTest >> workOffEverything [
+	"what a restarted queue does, in the order it does it: the dispatcher gives orphaned
+	claims back first, and only then is there anything for a worker to take. Driven
+	straight through rather than forked -- a test that waits for a process cannot say what
+	happened in it"
+
+	| queue |
+	queue := self queue.
+	queue recoverOrphanedClaims.
+	(SoilQueueWorker on: queue) run.
+	^ queue
+]
+
+{ #category : #helpers }
+SoilQueueDeadLetterTest >> workOneUnit [
+	"exactly one entry, so a test can look in between"
+
+	^ (SoilQueueWorker on: self queue) runOnce
 ]

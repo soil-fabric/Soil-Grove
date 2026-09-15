@@ -27,6 +27,17 @@ SoilQueueTest >> descriptionIn: aTransaction [
 ]
 
 { #category : #helpers }
+SoilQueueTest >> entryAt: aKey [
+	"nil when the entry has left the ordering. Asked inside the transaction, because an
+	entry comes back as a proxy"
+
+	| txn |
+	txn := soil newTransaction.
+	^ [ (self descriptionIn: txn) entryAt: aKey ifAbsent: [ nil ] ]
+		ensure: [ txn abort ]
+]
+
+{ #category : #helpers }
 SoilQueueTest >> entryDueIn: aDuration [
 
 	^ (SoilQueueTestEntry on: 'work')
@@ -91,30 +102,15 @@ SoilQueueTest >> tearDown [
 { #category : #tests }
 SoilQueueTest >> testAFinishedWorkUnitLeavesTheOrdering [
 
-	| queue key txn |
+	| key txn |
 	key := self put: (self entryDueIn: 0 seconds).
-	queue := self queue.
-	queue runStep.
+	self workOffEverything.
 
-	self deny: (queue isHolding: key).
 	txn := soil newTransaction.
 	self
 		assert: ((self descriptionIn: txn) entryAt: key ifAbsent: [ #gone ])
 		equals: #gone.
 	txn abort
-]
-
-{ #category : #tests }
-SoilQueueTest >> testAStepThatDidSomethingSaysThereMayBeMore [
-	"otherwise a queue works one entry and then waits for a signal that nobody is going to
-	send, because the one that put the second entry in was spent on the first"
-
-	| queue |
-	self put: (self entryDueIn: 0 seconds).
-	self put: (self entryDueIn: 0 seconds).
-	queue := self queue.
-	queue runStep.
-	self assert: queue hasPendingWork
 ]
 
 { #category : #tests }
@@ -149,6 +145,21 @@ SoilQueueTest >> testAWorkUnitClaimsBeforeItWorks [
 	self assert: ((self descriptionIn: txn) entryAt: key) isClaimed.
 	self assert: ((self descriptionIn: txn) entryAt: key) claimedAt notNil.
 	txn abort
+]
+
+{ #category : #tests }
+SoilQueueTest >> testAWorkerKeepsGoingUntilNothingComes [
+	"one entry is one work unit, and the worker asks again rather than waiting to be told.
+	Otherwise a queue would work one entry and then wait for a signal nobody sends, because
+	the one that announced the second entry was spent on the first"
+
+	| first second |
+	first := self put: (self entryDueIn: 0 seconds).
+	second := self put: (self entryDueIn: 0 seconds).
+	self workOffEverything.
+
+	self assert: (self entryAt: first) isNil.
+	self assert: (self entryAt: second) isNil
 ]
 
 { #category : #tests }
@@ -238,4 +249,18 @@ SoilQueueTest >> testTwoQueuesOnOneDescriptionDoNotKnowOfEachOther [
 	txn abort.
 
 	self assert: first equals: second
+]
+
+{ #category : #helpers }
+SoilQueueTest >> workOffEverything [
+	"what a restarted queue does, in the order it does it: the dispatcher gives orphaned
+	claims back first, and only then is there anything for a worker to take. Driven
+	straight through rather than forked -- a test that waits for a process cannot say what
+	happened in it"
+
+	| queue |
+	queue := self queue.
+	queue recoverOrphanedClaims.
+	(SoilQueueWorker on: queue) run.
+	^ queue
 ]

@@ -174,8 +174,8 @@ SoilQueueCrashTest >> testAContinuingEntryPicksUpWhereItStopped [
 
 	| key |
 	key := self put: [ :target | SoilQueueTestContinuingEntry on: target steps: 3 ].
-	self queue runStep.
-	self queue runStep.
+	self workOneUnit.
+	self workOneUnit.
 	self assert: (self entryAt: key do: [ :entry | entry progress ]) equals: 2.
 	self assert: self targetEffects equals: #( 1 2 ).
 
@@ -236,10 +236,21 @@ SoilQueueCrashTest >> testAnOrphanedClaimIsFoundAndGivenBack [
 
 { #category : #helpers }
 SoilQueueCrashTest >> workOffEverything [
-	"a restarted queue, driven until nothing is due any more"
+	"what a restarted queue does, in the order it does it: the dispatcher gives orphaned
+	claims back first, and only then is there anything for a worker to take. Driven
+	straight through rather than forked -- a test that waits for a process cannot say what
+	happened in it"
 
 	| queue |
 	queue := self queue.
-	5 timesRepeat: [ queue runStep ].
+	queue recoverOrphanedClaims.
+	(SoilQueueWorker on: queue) run.
 	^ queue
+]
+
+{ #category : #helpers }
+SoilQueueCrashTest >> workOneUnit [
+	"exactly one entry, so a test can look in between"
+
+	^ (SoilQueueWorker on: self queue) runOnce
 ]
