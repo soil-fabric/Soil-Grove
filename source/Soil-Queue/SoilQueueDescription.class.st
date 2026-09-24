@@ -33,7 +33,9 @@ Class {
 		'orphanedRetryLimit',
 		'failureRetryLimit',
 		'backoffBase',
-		'backoffCap'
+		'backoffCap',
+		'rateLimit',
+		'ratePeriod'
 	],
 	#category : #'Soil-Queue'
 }
@@ -374,6 +376,37 @@ SoilQueueDescription >> printOn: aStream [
 
 	super printOn: aStream.
 	aStream << ' ' << name << ' in ' << strategy range printString
+]
+
+{ #category : #rate }
+SoilQueueDescription >> rateLimit [
+	"how many entries may be handed out in any period of #ratePeriod, or nil for no rate at
+	all -- the default, and how a queue ran before it had one. A number here is what a far
+	side accepts per so long; it is the embedder's to know.
+
+	One rate for the whole queue. Work that needs a pace of its own gets a queue of its own,
+	on the same index if need be: queues that differ only in their rate are what segmenting
+	a queue is for"
+
+	^ rateLimit
+]
+
+{ #category : #rate }
+SoilQueueDescription >> rateLimit: anInteger per: aDuration [
+	"no more than anInteger entries handed out in any period of aDuration. Any period, not
+	the one on the clock: a burst up to the limit may go at once, and then the rate waits
+	until the oldest of it is aDuration ago"
+
+	anInteger < 1 ifTrue: [ ^ self error: 'a rate that lets nothing out would stop the queue' ].
+	rateLimit := anInteger.
+	ratePeriod := aDuration
+]
+
+{ #category : #rate }
+SoilQueueDescription >> ratePeriod [
+	"the length of the period #rateLimit counts in"
+
+	^ ratePeriod
 ]
 
 { #category : #removing }

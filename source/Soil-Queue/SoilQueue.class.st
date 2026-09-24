@@ -31,7 +31,8 @@ Class {
 		'recovered',
 		'workers',
 		'clock',
-		'wakeAt'
+		'wakeAt',
+		'rateCounter'
 	],
 	#category : #'Soil-Queue'
 }
@@ -42,7 +43,7 @@ SoilQueue class >> soilTransientInstVars [
 	superclass's rather than adding to it, and a forgotten one would drag a process or a
 	semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt )
+	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt rateCounter )
 ]
 
 { #category : #adding }
@@ -80,16 +81,31 @@ SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
 	"hand out the oldest due entry that nobody else holds, and remember that it is out.
 
 	Under the mutex, because this is where competing workers meet. What crosses the
-	boundary is a key: the transaction this scanned in is not the one the work happens in."
+	boundary is a key: the transaction this scanned in is not the one the work happens in.
+
+	The rate is checked here, at the outlet, because it is the queue's and not an entry's.
+	A due entry the rate does not let out yet is not handed out, and the time the rate has
+	room again is what aBlock hears -- so the worker that runs dry hands that on as the wake
+	time, just as it does the due time of an entry that is not due yet."
 
 	| key nextTime |
 	key := mutex critical: [
-		| found |
-		found := (self descriptionIn: aTransaction)
+		| description found |
+		description := self descriptionIn: aTransaction.
+		found := description
 			nextDueAt: aDateAndTime
 			skipping: inFlight
 			ifNone: [ :time | nextTime := time. nil ].
-		found ifNotNil: [ inFlight add: found ].
+		found ifNotNil: [
+			| free |
+			free := self rateFreeAt: aDateAndTime under: description.
+			free > aDateAndTime
+				ifTrue: [
+					nextTime := free.
+					found := nil ]
+				ifFalse: [
+					inFlight add: found.
+					self noteIssueAt: aDateAndTime under: description ] ].
 		found ].
 	^ key ifNil: [ aBlock cull: nextTime ]
 ]
@@ -184,7 +200,8 @@ SoilQueue >> initialize [
 	mutex := Mutex new.
 	inFlight := Set new.
 	workers := IdentitySet new.
-	recovered := false
+	recovered := false.
+	rateCounter := SoilQueueRateCounter new
 ]
 
 { #category : #testing }
@@ -217,6 +234,15 @@ SoilQueue >> nextDueTime [
 
 	^ self withTransactionDo: [ :txn |
 		(self descriptionIn: txn) nextDueTimeAt: self now ]
+]
+
+{ #category : #rate }
+SoilQueue >> noteIssueAt: aDateAndTime under: aDescription [
+	"an entry went out, and counts against the rate for its period. Nothing to count
+	without a rate"
+
+	aDescription rateLimit ifNil: [ ^ self ].
+	mutex critical: [ rateCounter noteIssueAt: aDateAndTime ]
 ]
 
 { #category : #waking }
@@ -256,6 +282,36 @@ SoilQueue >> prepareIn: aTransaction [
 
 	((self descriptionIn: aTransaction) nextDueTimeAt: self now)
 		ifNotNil: [ self noteWork ]
+]
+
+{ #category : #rate }
+SoilQueue >> rateAllowanceAt: aDateAndTime under: aDescription [
+	"how many entries the rate lets out at aDateAndTime. Without a rate there is no bound of
+	its own, and the worker limit is answered -- the one that decides then anyway"
+
+	^ aDescription rateLimit
+		ifNil: [ aDescription workerLimit ]
+		ifNotNil: [ :limit |
+			mutex critical: [
+				rateCounter
+					allowanceAt: aDateAndTime
+					limit: limit
+					period: aDescription ratePeriod ] ]
+]
+
+{ #category : #rate }
+SoilQueue >> rateFreeAt: aDateAndTime under: aDescription [
+	"from when the rate lets the next entry out: aDateAndTime itself when it has room, and
+	always without a rate"
+
+	^ aDescription rateLimit
+		ifNil: [ aDateAndTime ]
+		ifNotNil: [ :limit |
+			mutex critical: [
+				rateCounter
+					freeAt: aDateAndTime
+					limit: limit
+					period: aDescription ratePeriod ] ]
 ]
 
 { #category : #recovery }
@@ -323,10 +379,19 @@ SoilQueue >> release: aKey [
 SoilQueue >> rememberNextDueTime [
 	"the last thing a step does: read when the first entry of the ordering falls due. Only
 	a time still to come is a wake time. One that has come is the workers' business -- they
-	are running for it, and the last of them to run dry hands on what it found"
+	are running for it, and the last of them to run dry hands on what it found.
+
+	With a rate that is used up, 'due now' is not a time to wake at: nothing may go before
+	the rate has room again, and no worker is running to say so. So the wake time is the
+	later of the two"
 
 	| time |
-	time := self nextDueTime.
+	time := self withTransactionDo: [ :txn |
+		| description now |
+		description := self descriptionIn: txn.
+		now := self now.
+		(description nextDueTimeAt: now) ifNotNil: [ :due |
+			due max: (self rateFreeAt: now under: description) ] ].
 	(time notNil and: [ time > self now ]) ifFalse: [ ^ self ].
 	mutex critical: [
 		wakeAt := wakeAt
@@ -371,15 +436,18 @@ SoilQueue >> startWorkersForWhatIsDue [
 	The count stops at the limit and at the first entry that is not due, so the scan costs
 	the same whether ten entries are waiting or ten thousand. The number of waiting entries
 	says nothing about how many workers are needed anyway -- it only says how long the
-	working takes."
+	working takes. Nor for more than the rate lets out right now: a worker started for an
+	entry that may not go yet would only end again at once."
 
 	| wanted running |
 	self shouldStop ifTrue: [ ^ self ].
 	wanted := self withTransactionDo: [ :txn |
-		| description |
+		| description now |
 		description := self descriptionIn: txn.
-		(description dueCountAt: self now upTo: description workerLimit)
-			min: description workerLimit ].
+		now := self now.
+		((description dueCountAt: now upTo: description workerLimit)
+			min: description workerLimit)
+			min: (self rateAllowanceAt: now under: description) ].
 	running := mutex critical: [ workers size ].
 	(wanted - running) timesRepeat: [ self startWorker ]
 ]
