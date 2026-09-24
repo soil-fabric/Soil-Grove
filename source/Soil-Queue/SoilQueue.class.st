@@ -12,14 +12,22 @@ persisted description is precisely what a resident is, so I am one. Nothing abou
 forces a supervisor on anyone: created and not started, I still hand out entries, and
 without a supervisor there are no competing workers for the mutex to arbitrate.
 
-Mine are the mutex and the set of keys that are out. Keys, not entries -- an entry read
-in the transaction that selected it would already be a snapshot of an older moment in
-the transaction that works on it. For the same reason what I hand out is a key, and
-whoever takes it opens a transaction of its own.
+Mine is what competing workers meet at, and all of it lives in memory only: the mutex,
+the set of keys that are out, the workers that are running, the wake time and the count
+of what went out lately against the rate. Keys, not entries -- an entry read in the
+transaction that selected it would already be a snapshot of an older moment in the
+transaction that works on it. For the same reason what I hand out is a key, and whoever
+takes it opens a transaction of its own.
 
-One work unit at a time for now. How many run at once is the dispatcher's question and
-comes with the QueueWorker; the transaction boundaries below are already the ones that
-several of them will keep.
+Three roles, and the point of them is what each may not do. I hand out, and that is the
+only place an entry is chosen. My process is the dispatcher: a step decides how many
+workers there should be and when to wake next, and does no work itself. A QueueWorker
+asks me, claims, works, gives back, and asks again. A stop reaches all of them through
+me -- I stop handing out, and the workers run dry.
+
+What happens to an entry is decided by the entry: whether a failure is worth retrying,
+what holds after a crash, what giving up means for its target. How often and how fast is
+my description's -- the retry budget, the backoff and the rate.
 "
 Class {
 	#name : #SoilQueue,
