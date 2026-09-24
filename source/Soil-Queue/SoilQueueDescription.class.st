@@ -29,7 +29,8 @@ Class {
 		'strategy',
 		'format',
 		'deadLetters',
-		'workerLimit'
+		'workerLimit',
+		'orphanedRetryLimit'
 	],
 	#category : #'Soil-Queue'
 }
@@ -66,6 +67,15 @@ SoilQueueDescription >> add: anEntry [
 	key := self keyFor: anEntry.
 	strategy index at: key put: anEntry.
 	^ key asIndexKeyOfSize: strategy range keySize
+]
+
+{ #category : #accessing }
+SoilQueueDescription >> allowsOrphanedRetryOf: anEntry [
+	"whether an entry that lost its worker may be given back once more. Counted like the
+	restarts of a resident: with a limit of two, two orphaned entries come back and the
+	third orphaning is the one that parks it"
+
+	^ orphanedRetryLimit isNil or: [ anEntry orphanedRetries < orphanedRetryLimit ]
 ]
 
 { #category : #converting }
@@ -262,6 +272,25 @@ SoilQueueDescription >> nextDueTimeAt: aDateAndTime [
 		skipping: #(  )
 		ifNone: [ :time | ^ time ].
 	^ aDateAndTime
+]
+
+{ #category : #accessing }
+SoilQueueDescription >> orphanedRetryLimit [
+	"how often an entry may lose its worker and be given back before it is parked as a dead
+	letter. nil means no limit, and nil is the default: an entry that takes its worker
+	with it every time -- the poison entry -- is the case the limit is for, and how many
+	lost workers are too many depends on what the work does and how often the embedder
+	deploys. That is the embedder's knowledge; a number here would be a guess"
+
+	^ orphanedRetryLimit
+]
+
+{ #category : #accessing }
+SoilQueueDescription >> orphanedRetryLimit: anInteger [
+
+	(anInteger notNil and: [ anInteger < 0 ]) ifTrue: [
+		^ self error: 'a negative number of retries cannot be used up' ].
+	orphanedRetryLimit := anInteger
 ]
 
 { #category : #printing }

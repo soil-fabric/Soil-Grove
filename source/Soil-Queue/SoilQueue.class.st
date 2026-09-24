@@ -180,14 +180,25 @@ SoilQueue >> recover: aKey [
 	Its own transaction, so that one entry whose compensation throws does not keep the
 	others from coming back. A compensating entry that throws here stays claimed and is
 	tried again at the next pass, which is the right answer while the cleanup step has no
-	dead-lettering of its own."
+	dead-lettering of its own.
+
+	This is the one moment the queue learns that a worker went away, so it is where that is
+	counted. An entry that has lost its worker as often as the description allows is not
+	given back but parked: whatever took the worker with it would take the next one too.
+	Compensated first all the same, so that what it left behind is not left lying under a
+	dead letter."
 
 	self withTransactionDo: [ :txn |
-		| entry |
-		entry := (self descriptionIn: txn) entryAt: aKey.
+		| description entry |
+		description := self descriptionIn: txn.
+		entry := description entryAt: aKey.
 		entry isClaimed ifFalse: [ ^ self ].
 		entry resumption == #compensating ifTrue: [ entry compensateIn: txn ].
-		entry releaseClaim.
+		(description allowsOrphanedRetryOf: entry)
+			ifTrue: [
+				entry noteOrphaned.
+				entry releaseClaim ]
+			ifFalse: [ description deadLetter: aKey ].
 		txn commit ]
 ]
 

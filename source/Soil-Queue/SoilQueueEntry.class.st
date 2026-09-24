@@ -30,6 +30,14 @@ which of the three it is --
 	#repeating     run again from the start; idempotence is a promise, not an assumption
 	#compensating  clean up what the aborted attempt left behind, then start over
 
+I count my repetitions in two fields, one for each reason there can be, because the two
+must not use up each other's budget. #orphanedRetries counts how often my worker went
+away while I was claimed -- a crash, a deploy, a rolling release; nobody's fault and no
+cost. #failureRetries counts how often my work unit failed with an error my subclass
+called retriable -- a far side that answered 503; that one counts against the work.
+Neither is a count of attempts: a claim is taken for every attempt, the first one
+included, and counting there would make every failure look like a lost worker too.
+
 Waiting is courtesy, not a guarantee. A maintenance run can let entries finish; a crash
 cannot. Waiting lowers the number of repetitions -- the correctness is in the three
 semantics above and nowhere else.
@@ -48,7 +56,9 @@ Class {
 		'claimedAt',
 		'resumption',
 		'id',
-		'progress'
+		'progress',
+		'orphanedRetries',
+		'failureRetries'
 	],
 	#category : #'Soil-Queue'
 }
@@ -147,6 +157,15 @@ SoilQueueEntry >> eligibleAt: aDateAndTime [
 ]
 
 { #category : #accessing }
+SoilQueueEntry >> failureRetries [
+	"how often my work unit failed with an error my subclass called retriable and was run
+	again. What counts against the work: a far side that failed, a configuration that does
+	not hold -- never a worker that went away"
+
+	^ failureRetries
+]
+
+{ #category : #accessing }
 SoilQueueEntry >> id [
 	"eight bytes that tell me apart from the other entries that are due at the same time"
 
@@ -160,7 +179,9 @@ SoilQueueEntry >> initialize [
 	state := #pending.
 	resumption := self class resumption.
 	eligibleAt := DateAndTime now.
-	id := self class newId
+	id := self class newId.
+	orphanedRetries := 0.
+	failureRetries := 0
 ]
 
 { #category : #testing }
@@ -227,6 +248,24 @@ SoilQueueEntry >> markDone [
 	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self expecting: #claimed ].
 	state := #done.
 	claimedAt := nil
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> noteOrphaned [
+	"my worker went away while I was claimed, and I am about to be given back. Counted here,
+	at the one moment the queue finds that out, and not at the claim"
+
+	orphanedRetries := orphanedRetries + 1
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> orphanedRetries [
+	"how often I was found claimed with no worker holding me and was given back: the image
+	went away, a deploy, a rolling release. Nobody's fault and no cost, which is why it is
+	kept apart from #failureRetries -- a deploy must not use up the budget of a far side
+	that is failing"
+
+	^ orphanedRetries
 ]
 
 { #category : #working }

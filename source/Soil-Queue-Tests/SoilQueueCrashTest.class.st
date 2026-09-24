@@ -43,6 +43,19 @@ SoilQueueCrashTest >> crashBeforeTheNextStepOn: aKey [
 ]
 
 { #category : #helpers }
+SoilQueueCrashTest >> deadLetters [
+	"each parked entry as its key, its state and how often it lost its worker"
+
+	| txn letters |
+	txn := soil newTransaction.
+	letters := OrderedCollection new.
+	[ (self descriptionIn: txn) deadLettersDo: [ :key :entry |
+		letters add: { key. entry state. entry orphanedRetries } ] ]
+		ensure: [ txn abort ].
+	^ letters asArray
+]
+
+{ #category : #helpers }
 SoilQueueCrashTest >> descriptionIn: aTransaction [
 
 	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
@@ -73,6 +86,13 @@ SoilQueueCrashTest >> inTransaction: aBlock [
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
 ]
 
+{ #category : #helpers }
+SoilQueueCrashTest >> orphanedRetryLimit: anInteger [
+
+	self inTransaction: [ :txn |
+		(self descriptionIn: txn) orphanedRetryLimit: anInteger ]
+]
+
 { #category : #accessing }
 SoilQueueCrashTest >> path [
 
@@ -98,6 +118,13 @@ SoilQueueCrashTest >> queue [
 		supervisor: soil newResidentSupervisor;
 		yourself ]
 		ensure: [ txn abort ]
+]
+
+{ #category : #helpers }
+SoilQueueCrashTest >> retriesOf: aKey [
+
+	^ self entryAt: aKey do: [ :entry |
+		{ entry state. entry orphanedRetries. entry failureRetries } ]
 ]
 
 { #category : #running }
@@ -150,6 +177,18 @@ SoilQueueCrashTest >> tearDown [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testAClaimCountsNoRetry [
+	"a claim is taken for every attempt, the first one included. Counting there would count
+	attempts, and every retry for a failure would show up as a lost worker as well"
+
+	| key |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self crashBeforeTheNextStepOn: key.
+
+	self assert: (self retriesOf: key) equals: #( #claimed 0 0 )
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testACompensatingEntryIsCleanedUpBeforeItRunsAgain [
 	"the case that gets forgotten, and the one the other two cannot cover: the aborted
 	attempt left an effect standing, so the cleanup goes first and takes it away. What is
@@ -184,6 +223,39 @@ SoilQueueCrashTest >> testAContinuingEntryPicksUpWhereItStopped [
 
 	self assert: (self stateOf: key) equals: nil.
 	self assert: self targetEffects equals: #( 1 2 3 )
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testAnEntryThatKeepsLosingItsWorkerIsParked [
+	"what takes its worker with it every time -- the poison entry -- stops coming back once
+	the limit is used up. It is parked, not released: releasing it would hand the next
+	worker the same end"
+
+	| key |
+	self orphanedRetryLimit: 2.
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	2 timesRepeat: [
+		self crashBeforeTheNextStepOn: key.
+		self queue recoverOrphanedClaims ].
+	self assert: (self retriesOf: key) equals: #( #pending 2 0 ).
+
+	self crashBeforeTheNextStepOn: key.
+	self queue recoverOrphanedClaims.
+	self assert: (self retriesOf: key) isNil.
+	self assert: self deadLetters equals: { { key. #deadLetter. 2 } }
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testAnOrphanedClaimCountsAsAnOrphanedRetry [
+	"the one place where the queue learns that a worker went away is the recovery pass, so
+	that is where it is counted -- and only there"
+
+	| key |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self crashBeforeTheNextStepOn: key.
+	self queue recoverOrphanedClaims.
+
+	self assert: (self retriesOf: key) equals: #( #pending 1 0 )
 ]
 
 { #category : #tests }
@@ -232,6 +304,20 @@ SoilQueueCrashTest >> testAnOrphanedClaimIsFoundAndGivenBack [
 	self queue recoverOrphanedClaims.
 	self assert: (self stateOf: key) equals: #pending.
 	self assert: (self entryAt: key do: [ :entry | entry claimedAt ]) isNil
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testWithoutALimitAnOrphanAlwaysComesBack [
+	"no limit is the default: how many lost workers are too many is the embedder's
+	knowledge, and a number here would be a guess"
+
+	| key |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	5 timesRepeat: [
+		self crashBeforeTheNextStepOn: key.
+		self queue recoverOrphanedClaims ].
+
+	self assert: (self retriesOf: key) equals: #( #pending 5 0 )
 ]
 
 { #category : #helpers }
