@@ -194,6 +194,24 @@ SoilQueueDescription >> keysAndEntriesDo: aBlock [
 		scanKey := found + 1 ]
 ]
 
+{ #category : #moving }
+SoilQueueDescription >> moveKey: aKey for: anEntry [
+	"put anEntry under the key it asks for now, and answer that key. Its due time may have
+	changed since it came in -- that is how a follow-up later and a backoff are expressed --
+	and the key is what sorts by it. Unchanged, nothing is written.
+
+	One move rather than a removal and an insertion, because the removal answers an
+	unloaded proxy and an insertion would resolve it: the target would be read from disk
+	only to change the number it is filed under. Asked of the index and not of an iterator
+	on it -- the index is the one that writes the journal and marks itself for the commit."
+
+	| newKey |
+	newKey := (self keyFor: anEntry) asIndexKeyOfSize: strategy range keySize.
+	newKey = aKey ifTrue: [ ^ aKey ].
+	strategy index moveKey: aKey to: newKey.
+	^ newKey
+]
+
 { #category : #accessing }
 SoilQueueDescription >> name [
 

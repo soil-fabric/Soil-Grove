@@ -29,7 +29,9 @@ Class {
 		'mutex',
 		'inFlight',
 		'recovered',
-		'workers'
+		'workers',
+		'clock',
+		'wakeAt'
 	],
 	#category : #'Soil-Queue'
 }
@@ -40,7 +42,7 @@ SoilQueue class >> soilTransientInstVars [
 	superclass's rather than adding to it, and a forgotten one would drag a process or a
 	semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers )
+	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt )
 ]
 
 { #category : #adding }
@@ -59,11 +61,18 @@ SoilQueue >> assignNext [
 	nil means 'nothing for you', and a worker that hears it ends. That is also how a stop
 	arrives: the queue stops handing out, and the workers run dry by themselves. Nobody
 	suspends a process from outside, because a process stopped inside a transaction leaves
-	half-written state and held locks behind."
+	half-written state and held locks behind.
+
+	A worker that hears nil ends, and whatever is due later is the dispatcher's again. The
+	scan that found nothing due found the next due time on its way, so that is handed to the
+	dispatcher here -- otherwise an entry pushed out to later by the work unit that just
+	ran would wake nobody."
 
 	self shouldStop ifTrue: [ ^ nil ].
 	^ self withTransactionDo: [ :txn |
-		self assignNextDueAt: DateAndTime now in: txn ifNone: [ :time | nil ] ]
+		self assignNextDueAt: self now in: txn ifNone: [ :time |
+			time ifNotNil: [ self noteNextDueAt: time ].
+			nil ] ]
 ]
 
 { #category : #working }
@@ -102,8 +111,17 @@ SoilQueue >> claim: aKey [
 	written here is invisible to a transaction that is already open elsewhere."
 
 	self withTransactionDo: [ :txn |
-		((self descriptionIn: txn) entryAt: aKey) claimAt: DateAndTime now.
+		((self descriptionIn: txn) entryAt: aKey) claimAt: self now.
 		txn commit ]
+]
+
+{ #category : #accessing }
+SoilQueue >> clock: aClock [
+	"where I read the time from: anything that answers #now. Without one it is the wall
+	clock. A test gives me one that stands still until it is moved, so that 'an hour later'
+	is a statement rather than an hour"
+
+	clock := aClock
 ]
 
 { #category : #working }
@@ -114,6 +132,14 @@ SoilQueue >> conflictLimit [
 	trying for ever would hide it."
 
 	^ 3
+]
+
+{ #category : #waking }
+SoilQueue >> forgetWakeTime [
+	"at the start of a step, which reads the ordering afresh. A wake time that has passed
+	would otherwise stay behind and have the dispatcher step, and step again"
+
+	mutex critical: [ wakeAt := nil ]
 ]
 
 { #category : #initialization }
@@ -155,7 +181,32 @@ SoilQueue >> nextDueTime [
 	external wakeup, and for its decision whether the database is quiet enough to close."
 
 	^ self withTransactionDo: [ :txn |
-		(self descriptionIn: txn) nextDueTimeAt: DateAndTime now ]
+		(self descriptionIn: txn) nextDueTimeAt: self now ]
+]
+
+{ #category : #waking }
+SoilQueue >> noteNextDueAt: aDateAndTime [
+	"something falls due at aDateAndTime, and the dispatcher has to be awake by then. The
+	earlier of two times wins: a later one does not make an earlier entry any less due.
+	The dispatcher is signalled but not handed a flag, because nothing is due yet -- it
+	only has to measure its sleep again"
+
+	mutex critical: [
+		wakeAt := wakeAt
+			ifNil: [ aDateAndTime ]
+			ifNotNil: [ :current | current min: aDateAndTime ] ].
+	self wakeUp
+]
+
+{ #category : #accessing }
+SoilQueue >> now [
+	"the one place I ask for the time. Due times are compared against it, a claim is
+	stamped with it, and the wake time is measured from it -- one source, so that they
+	cannot disagree"
+
+	^ clock
+		ifNil: [ DateAndTime now ]
+		ifNotNil: [ :aClock | aClock now ]
 ]
 
 { #category : #running }
@@ -165,11 +216,10 @@ SoilQueue >> prepareIn: aTransaction [
 	gone with it.
 
 	This only raises the flag; the first work unit does the rest. An entry that is not due
-	yet raises it too, and the step that finds nothing due then costs one turn -- what it
-	does not do yet is sleep until that entry becomes due. That is the dispatcher's wakeup
-	time and it is not built."
+	yet raises it too: the step that finds nothing due is the one that reads when it will
+	be, and the dispatcher sleeps until then."
 
-	((self descriptionIn: aTransaction) nextDueTimeAt: DateAndTime now)
+	((self descriptionIn: aTransaction) nextDueTimeAt: self now)
 		ifNotNil: [ self noteWork ]
 ]
 
@@ -223,6 +273,21 @@ SoilQueue >> release: aKey [
 	mutex critical: [ inFlight remove: aKey ifAbsent: [ nil ] ]
 ]
 
+{ #category : #waking }
+SoilQueue >> rememberNextDueTime [
+	"the last thing a step does: read when the first entry of the ordering falls due. Only
+	a time still to come is a wake time. One that has come is the workers' business -- they
+	are running for it, and the last of them to run dry hands on what it found"
+
+	| time |
+	time := self nextDueTime.
+	(time notNil and: [ time > self now ]) ifFalse: [ ^ self ].
+	mutex critical: [
+		wakeAt := wakeAt
+			ifNil: [ time ]
+			ifNotNil: [ :current | current min: time ] ]
+]
+
 { #category : #running }
 SoilQueue >> runStep [
 	"the dispatcher's step, and it does no work itself. One work unit here would block
@@ -232,14 +297,16 @@ SoilQueue >> runStep [
 	What it decides is how many workers there should be, never who gets what -- that is
 	the queue's own, under the mutex, because that is where competing workers meet."
 
+	self forgetWakeTime.
 	self recoverOrphanedClaims.
-	self startWorkersForWhatIsDue
+	self startWorkersForWhatIsDue.
+	self rememberNextDueTime
 ]
 
 { #category : #accessing }
 SoilQueue >> runStrategyClass [
 
-	^ SoilSignalRunStrategy
+	^ SoilQueueRunStrategy
 ]
 
 { #category : #running }
@@ -265,7 +332,7 @@ SoilQueue >> startWorkersForWhatIsDue [
 	wanted := self withTransactionDo: [ :txn |
 		| description |
 		description := self descriptionIn: txn.
-		(description dueCountAt: DateAndTime now upTo: description workerLimit)
+		(description dueCountAt: self now upTo: description workerLimit)
 			min: description workerLimit ].
 	running := mutex critical: [ workers size ].
 	(wanted - running) timesRepeat: [ self startWorker ]
@@ -278,6 +345,34 @@ SoilQueue >> terminateProcesses [
 
 	self workers do: [ :each | each terminate ].
 	super terminateProcesses
+]
+
+{ #category : #running }
+SoilQueue >> tick [
+	"the dispatcher's sleep is measured in the time that was left when it began. A wall
+	clock set forward in the meantime would let it oversleep, so every tick has it look at
+	the time again. That costs a comparison, not a step: a wake-up with nothing due puts it
+	straight back to sleep"
+
+	super tick.
+	self wakeUp
+]
+
+{ #category : #waking }
+SoilQueue >> timeUntilWake [
+	"how long the dispatcher may sleep before the next entry falls due, never less than
+	nothing. nil when there is no wake time: then it sleeps until somebody signals"
+
+	^ self wakeAt ifNotNil: [ :time | (time - self now) max: 0 seconds ]
+]
+
+{ #category : #waking }
+SoilQueue >> wakeAt [
+	"when the dispatcher has to be awake because an entry falls due, or nil when nothing
+	is known to fall due. Kept in memory and nowhere else: it is read between two steps,
+	where no transaction is open"
+
+	^ mutex critical: [ wakeAt ]
 ]
 
 { #category : #working }
@@ -306,9 +401,12 @@ SoilQueue >> work: aKey [
 SoilQueue >> workOnce: aKey [
 	"one attempt at the work unit, and what follows from what it answers, in one commit.
 
-	#more leaves the entry where it is and only gives the claim back. Pushing it out to a
-	later due time is backoff, and backoff is not part of this stage -- an entry that says
-	it goes on becomes due again immediately, which is correct and merely impatient.
+	#more gives the claim back, and the entry stays in the ordering under the key its due
+	time now asks for. A work unit that says 'again, but later' has moved its #eligibleAt,
+	and the key is what sorts by it -- left where it was, the entry would be handed out
+	again at once. The move goes with the result into the same commit, and it never reads
+	the target: only the reference travels. An entry that did not move its due time keeps
+	its key and is due again immediately.
 
 	An entry that is not ready to run never gets as far as its work unit: something it
 	needs is gone, no repetition will bring it back, and it is parked as a dead letter
@@ -330,7 +428,9 @@ SoilQueue >> workOnce: aKey [
 				^ self ].
 		outcome := entry performIn: txn.
 		outcome == #more
-			ifTrue: [ entry releaseClaim ]
+			ifTrue: [
+				entry releaseClaim.
+				description moveKey: aKey for: entry ]
 			ifFalse: [
 				description removeKey: aKey.
 				entry markDone ].
