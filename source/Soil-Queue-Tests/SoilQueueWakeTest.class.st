@@ -55,6 +55,15 @@ SoilQueueWakeTest >> path [
 ]
 
 { #category : #helpers }
+SoilQueueWakeTest >> postponingEntry [
+	"due now by the test's clock, and an hour later once it has run"
+
+	^ (SoilQueueTestPostponingEntry on: 'work' postponedBy: 1 hour)
+		eligibleAt: clock now;
+		yourself
+]
+
+{ #category : #helpers }
 SoilQueueWakeTest >> put: anEntry [
 
 	| txn |
@@ -107,6 +116,19 @@ SoilQueueWakeTest >> start: aQueue [
 	[ aQueue startIn: txn ] ensure: [ txn abort ]
 ]
 
+{ #category : #helpers }
+SoilQueueWakeTest >> stateAndDueTimeAt: aKey [
+	"read inside the transaction: an entry comes back as a proxy, and a proxy of an aborted
+	transaction answers nothing"
+
+	| txn |
+	txn := soil newTransaction.
+	^ [ | entry |
+	  entry := (self descriptionIn: txn) entryAt: aKey.
+	  { entry state. entry eligibleAt } ]
+		ensure: [ txn abort ]
+]
+
 { #category : #running }
 SoilQueueWakeTest >> tearDown [
 	"a sleeping dispatcher has to be out of its loop before the database goes away"
@@ -128,6 +150,20 @@ SoilQueueWakeTest >> testADispatcherStepRemembersWhenTheNextEntryFallsDue [
 
 	self assert: queue workers isEmpty.
 	self assert: queue wakeAt equals: clock now + 1 hour
+]
+
+{ #category : #tests }
+SoilQueueWakeTest >> testAMovedEntryRunsOnceItsNewTimeHasCome [
+
+	| queue |
+	self put: self postponingEntry.
+	queue := self queue.
+	(SoilQueueWorker on: queue) run.
+	self assert: self keys size equals: 1.
+
+	clock advanceBy: 1 hour.
+	(SoilQueueWorker on: queue) run.
+	self assert: self keys isEmpty
 ]
 
 { #category : #tests }
@@ -209,6 +245,26 @@ SoilQueueWakeTest >> testAnEarlierEntryHandedInCutsTheWaitShort [
 	self assert: queue runStrategy isDue.
 	queue runStep.
 	self assert: queue wakeAt equals: clock now + 10 minutes
+]
+
+{ #category : #tests }
+SoilQueueWakeTest >> testAnEntryThatGoesOnLaterMovesItsKey [
+	"a claim leaves the key alone, a new due time cannot: the key is what sorts by it"
+
+	| queue key |
+	key := self put: self postponingEntry.
+	queue := self queue.
+	(SoilQueueWorker on: queue) runOnce.
+
+	self deny: (self keys includes: key).
+	self assert: self keys size equals: 1.
+	self
+		assert: (self stateAndDueTimeAt: self keys first)
+		equals: { #pending. clock now + 1 hour }.
+	self assert: queue wakeAt isNil.
+
+	self assert: (SoilQueueWorker on: queue) runOnce isNil.
+	self assert: queue wakeAt equals: clock now + 1 hour
 ]
 
 { #category : #tests }

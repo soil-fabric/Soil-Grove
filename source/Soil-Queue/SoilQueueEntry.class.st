@@ -141,7 +141,8 @@ SoilQueueEntry >> eligibleAt [
 { #category : #accessing }
 SoilQueueEntry >> eligibleAt: aDateAndTime [
 	"whoever changes this on an entry that already lies in a queue has to move its key with
-	it, because the key is what sorts by this"
+	it, because the key is what sorts by this. A work unit of mine may change it and answer
+	#more: the queue then moves the key itself, in the same commit"
 
 	eligibleAt := aDateAndTime
 ]

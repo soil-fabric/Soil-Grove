@@ -401,9 +401,12 @@ SoilQueue >> work: aKey [
 SoilQueue >> workOnce: aKey [
 	"one attempt at the work unit, and what follows from what it answers, in one commit.
 
-	#more leaves the entry where it is and only gives the claim back. Pushing it out to a
-	later due time is backoff, and backoff is not part of this stage -- an entry that says
-	it goes on becomes due again immediately, which is correct and merely impatient.
+	#more gives the claim back, and the entry stays in the ordering under the key its due
+	time now asks for. A work unit that says 'again, but later' has moved its #eligibleAt,
+	and the key is what sorts by it -- left where it was, the entry would be handed out
+	again at once. The move goes with the result into the same commit, and it never reads
+	the target: only the reference travels. An entry that did not move its due time keeps
+	its key and is due again immediately.
 
 	An entry that is not ready to run never gets as far as its work unit: something it
 	needs is gone, no repetition will bring it back, and it is parked as a dead letter
@@ -425,7 +428,9 @@ SoilQueue >> workOnce: aKey [
 				^ self ].
 		outcome := entry performIn: txn.
 		outcome == #more
-			ifTrue: [ entry releaseClaim ]
+			ifTrue: [
+				entry releaseClaim.
+				description moveKey: aKey for: entry ]
 			ifFalse: [
 				description removeKey: aKey.
 				entry markDone ].
