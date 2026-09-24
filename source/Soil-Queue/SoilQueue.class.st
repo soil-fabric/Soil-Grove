@@ -104,6 +104,41 @@ SoilQueue >> basicIsIdle [
 ]
 
 { #category : #working }
+SoilQueue >> book: anError for: aKey [
+	"the work unit of an entry threw, and its transaction is gone. What is left to do is
+	mine, in a transaction of my own: ask the entry what the error means, and then either
+	put it off and count it, or give up on it.
+
+	Put off: #failureRetries goes up, the due time moves out by the delay the entry asks
+	for, and the key moves with it -- the dispatcher reads the next wake time off the
+	ordering, and the worker that runs dry hands it on. Given up: the entry gets to say so
+	to its target (#giveUp:in:), and is done. A failure the entry cannot get past is a
+	result, not a dead letter; that one is kept for entries nobody could get to at all.
+
+	The error is kept for diagnosis. It is not counted as a step error: that count is what
+	shows a crash loop, and a failure that was handled is none"
+
+	lastStepError := anError.
+	self withTransactionDo: [ :txn |
+		| description entry |
+		description := self descriptionIn: txn.
+		entry := description entryAt: aKey.
+		((entry classifyError: anError) == #retriable
+			and: [ description allowsFailureRetryOf: entry ])
+			ifTrue: [
+				entry noteFailure.
+				entry eligibleAt: self now
+					+ (entry retryDelayAfter: entry failureRetries under: description).
+				entry releaseClaim.
+				description moveKey: aKey for: entry ]
+			ifFalse: [
+				entry giveUp: anError in: txn.
+				description removeKey: aKey.
+				entry markDone ].
+		txn commit ]
+]
+
+{ #category : #working }
 SoilQueue >> claim: aKey [
 	"step 2 of a work unit: its own short transaction, committed before the work starts.
 	Its only purpose is the crash case -- an entry found as claimed with no worker running
@@ -394,18 +429,22 @@ SoilQueue >> work: aKey [
 	not happen: somebody else committed the same objects first. So the same work unit runs
 	again at once -- no counter, no backoff, and above all no carrying on from the old
 	snapshot. A fresh transaction is what makes the re-read happen, and it is the whole
-	point of starting over rather than committing again."
+	point of starting over rather than committing again.
 
-	| attempts |
+	A work unit that throws is booked afterwards, outside the loop: a conflict in the
+	bookkeeping must not run the work again."
+
+	| attempts failure |
 	attempts := 0.
 	[ attempts := attempts + 1.
-	  [ self workOnce: aKey.
+	  [ failure := self workOnce: aKey.
 	    true ]
 		on: SoilObjectHasConcurrentChange
 		do: [ :aConflict |
 			attempts >= self conflictLimit ifTrue: [ aConflict pass ].
 			false ] ]
-		whileFalse
+		whileFalse.
+	failure ifNotNil: [ self book: failure for: aKey ]
 ]
 
 { #category : #working }
@@ -424,9 +463,13 @@ SoilQueue >> workOnce: aKey [
 	instead. That is infrastructure and is kept apart from failing *at* the work, which is
 	a result and ends in #markDone.
 
-	A thrown work unit discards the whole transaction: the entry stays in the ordering and
-	keeps saying claimed. Booking that as a failed attempt needs a transaction of its own
-	and belongs with retry."
+	A work unit that throws discards the whole transaction, and I answer the error, so that
+	it is booked in a transaction of its own (#book:for:). Only an error out of the work
+	unit is answered. One from anywhere else -- the commit, the store -- is no statement
+	about the work, and classifying it would let the entry's #permanent throw away work
+	that never got to run; it passes, and the entry stays claimed for the recovery pass.
+	A write conflict passes too, wherever it comes from: it is neither of the two failures
+	an entry knows about, and #work: runs the unit again for it. Otherwise I answer nil."
 
 	self withTransactionDo: [ :txn |
 		| description entry outcome |
@@ -437,7 +480,11 @@ SoilQueue >> workOnce: aKey [
 				description deadLetter: aKey.
 				txn commit.
 				^ self ].
-		outcome := entry performIn: txn.
+		outcome := [ entry performIn: txn ]
+			on: Error
+			do: [ :anError |
+				(anError isKindOf: SoilObjectHasConcurrentChange) ifTrue: [ anError pass ].
+				^ anError ].
 		outcome == #more
 			ifTrue: [
 				entry releaseClaim.
@@ -445,7 +492,8 @@ SoilQueue >> workOnce: aKey [
 			ifFalse: [
 				description removeKey: aKey.
 				entry markDone ].
-		txn commit ]
+		txn commit ].
+	^ nil
 ]
 
 { #category : #running }
