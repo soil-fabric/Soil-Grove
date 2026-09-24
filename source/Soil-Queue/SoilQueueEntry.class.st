@@ -166,6 +166,18 @@ SoilQueueEntry >> failureRetries [
 	^ failureRetries
 ]
 
+{ #category : #working }
+SoilQueueEntry >> giveUp: anError in: aTransaction [
+	"my work unit failed and will not be tried again: the error was not retriable, or the
+	retries are used up. Called in the queue's bookkeeping transaction, after the one my
+	work unit threw in is gone, and before I am taken out of the ordering in the same
+	commit.
+
+	The place for a subclass to put its target into its error state -- a flow instance
+	that ends in error, say. What that means is the subclass's business; the queue only
+	says when. Nothing by default"
+]
+
 { #category : #accessing }
 SoilQueueEntry >> id [
 	"eight bytes that tell me apart from the other entries that are due at the same time"
@@ -252,6 +264,13 @@ SoilQueueEntry >> markDone [
 ]
 
 { #category : #accessing }
+SoilQueueEntry >> noteFailure [
+	"my work unit failed with an error I called retriable, and I am about to be put off"
+
+	failureRetries := failureRetries + 1
+]
+
+{ #category : #accessing }
 SoilQueueEntry >> noteOrphaned [
 	"my worker went away while I was claimed, and I am about to be given back. Counted here,
 	at the one moment the queue finds that out, and not at the claim"
@@ -328,6 +347,14 @@ SoilQueueEntry >> resumption [
 	entry"
 
 	^ resumption
+]
+
+{ #category : #working }
+SoilQueueEntry >> retryDelayAfter: anInteger under: aDescription [
+	"how long to wait before retry number anInteger. The queue's curve by default; a
+	subclass whose kind of work wants a different pace answers its own"
+
+	^ aDescription retryDelayAfter: anInteger
 ]
 
 { #category : #accessing }
