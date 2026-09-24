@@ -31,6 +31,9 @@ Class {
 		'deadLetters',
 		'workerLimit',
 		'orphanedRetryLimit',
+		'failureRetryLimit',
+		'backoffBase',
+		'backoffCap',
 		'rateLimit',
 		'ratePeriod'
 	],
@@ -71,6 +74,14 @@ SoilQueueDescription >> add: anEntry [
 	^ key asIndexKeyOfSize: strategy range keySize
 ]
 
+{ #category : #retrying }
+SoilQueueDescription >> allowsFailureRetryOf: anEntry [
+	"whether an entry whose work unit failed retriably may be tried once more. With a limit
+	of three, three retries happen and the fourth failure is the one that gives up"
+
+	^ anEntry failureRetries < self failureRetryLimit
+]
+
 { #category : #accessing }
 SoilQueueDescription >> allowsOrphanedRetryOf: anEntry [
 	"whether an entry that lost its worker may be given back once more. Counted like the
@@ -84,6 +95,35 @@ SoilQueueDescription >> allowsOrphanedRetryOf: anEntry [
 SoilQueueDescription >> appendKeyPartsFor: anEntry on: aWriteStream [
 	"the embedder's link in the chain, and the place a section inside one queue is marked.
 	Nothing by default -- whoever has nothing to contribute contributes nothing"
+]
+
+{ #category : #retrying }
+SoilQueueDescription >> backoffBase [
+	"the pause before the first retry. Every further failure doubles it, up to
+	#backoffCap. One second by default, so that a short disturbance -- a dropped
+	connection -- is over quickly"
+
+	^ backoffBase ifNil: [ 1 second ]
+]
+
+{ #category : #retrying }
+SoilQueueDescription >> backoffBase: aDuration [
+
+	backoffBase := aDuration
+]
+
+{ #category : #retrying }
+SoilQueueDescription >> backoffCap [
+	"the longest pause between two retries, however often the work has failed. An hour by
+	default"
+
+	^ backoffCap ifNil: [ 1 hour ]
+]
+
+{ #category : #retrying }
+SoilQueueDescription >> backoffCap: aDuration [
+
+	backoffCap := aDuration
 ]
 
 { #category : #accessing }
@@ -141,6 +181,24 @@ SoilQueueDescription >> entryAt: aKey [
 SoilQueueDescription >> entryAt: aKey ifAbsent: aBlock [
 
 	^ strategy index at: aKey ifAbsent: aBlock
+]
+
+{ #category : #retrying }
+SoilQueueDescription >> failureRetryLimit [
+	"how often a work unit that failed retriably is tried again before the entry gives up.
+	Three by default. A retry is only ever asked for by an entry that calls an error
+	retriable, and what it costs -- a far side hit again, a quota used up -- is why the
+	budget is narrow"
+
+	^ failureRetryLimit ifNil: [ 3 ]
+]
+
+{ #category : #retrying }
+SoilQueueDescription >> failureRetryLimit: anInteger [
+
+	anInteger < 0 ifTrue: [
+		^ self error: 'a negative number of retries cannot be used up' ].
+	failureRetryLimit := anInteger
 ]
 
 { #category : #accessing }
@@ -357,6 +415,14 @@ SoilQueueDescription >> removeKey: aKey [
 	failed at its work, dead lettered -- is written in the same transaction"
 
 	^ strategy index removeKey: aKey
+]
+
+{ #category : #retrying }
+SoilQueueDescription >> retryDelayAfter: anInteger [
+	"the pause before retry number anInteger: the base, doubled for every failure before
+	it, never longer than the cap"
+
+	^ (self backoffBase * (2 raisedTo: anInteger - 1)) min: self backoffCap
 ]
 
 { #category : #initialization }
