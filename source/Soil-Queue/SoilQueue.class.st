@@ -29,7 +29,8 @@ Class {
 		'mutex',
 		'inFlight',
 		'recovered',
-		'workers'
+		'workers',
+		'clock'
 	],
 	#category : #'Soil-Queue'
 }
@@ -40,7 +41,7 @@ SoilQueue class >> soilTransientInstVars [
 	superclass's rather than adding to it, and a forgotten one would drag a process or a
 	semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers )
+	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock )
 ]
 
 { #category : #adding }
@@ -63,7 +64,7 @@ SoilQueue >> assignNext [
 
 	self shouldStop ifTrue: [ ^ nil ].
 	^ self withTransactionDo: [ :txn |
-		self assignNextDueAt: DateAndTime now in: txn ifNone: [ :time | nil ] ]
+		self assignNextDueAt: self now in: txn ifNone: [ :time | nil ] ]
 ]
 
 { #category : #working }
@@ -102,8 +103,17 @@ SoilQueue >> claim: aKey [
 	written here is invisible to a transaction that is already open elsewhere."
 
 	self withTransactionDo: [ :txn |
-		((self descriptionIn: txn) entryAt: aKey) claimAt: DateAndTime now.
+		((self descriptionIn: txn) entryAt: aKey) claimAt: self now.
 		txn commit ]
+]
+
+{ #category : #accessing }
+SoilQueue >> clock: aClock [
+	"where I read the time from: anything that answers #now. Without one it is the wall
+	clock. A test gives me one that stands still until it is moved, so that 'an hour later'
+	is a statement rather than an hour"
+
+	clock := aClock
 ]
 
 { #category : #working }
@@ -155,7 +165,18 @@ SoilQueue >> nextDueTime [
 	external wakeup, and for its decision whether the database is quiet enough to close."
 
 	^ self withTransactionDo: [ :txn |
-		(self descriptionIn: txn) nextDueTimeAt: DateAndTime now ]
+		(self descriptionIn: txn) nextDueTimeAt: self now ]
+]
+
+{ #category : #accessing }
+SoilQueue >> now [
+	"the one place I ask for the time. Due times are compared against it, a claim is
+	stamped with it, and the wake time is measured from it -- one source, so that they
+	cannot disagree"
+
+	^ clock
+		ifNil: [ DateAndTime now ]
+		ifNotNil: [ :aClock | aClock now ]
 ]
 
 { #category : #running }
@@ -169,7 +190,7 @@ SoilQueue >> prepareIn: aTransaction [
 	does not do yet is sleep until that entry becomes due. That is the dispatcher's wakeup
 	time and it is not built."
 
-	((self descriptionIn: aTransaction) nextDueTimeAt: DateAndTime now)
+	((self descriptionIn: aTransaction) nextDueTimeAt: self now)
 		ifNotNil: [ self noteWork ]
 ]
 
@@ -265,7 +286,7 @@ SoilQueue >> startWorkersForWhatIsDue [
 	wanted := self withTransactionDo: [ :txn |
 		| description |
 		description := self descriptionIn: txn.
-		(description dueCountAt: DateAndTime now upTo: description workerLimit)
+		(description dueCountAt: self now upTo: description workerLimit)
 			min: description workerLimit ].
 	running := mutex critical: [ workers size ].
 	(wanted - running) timesRepeat: [ self startWorker ]
