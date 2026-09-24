@@ -10,7 +10,7 @@ Class {
 }
 
 { #category : #working }
-SoilQueueTestPatientEntry >> retryDelayAfter: anInteger under: aDescription [
+SoilQueueTestPatientEntry >> retryDelayAfter: anInteger under: aSettings [
 
 	^ 10 minutes
 ]

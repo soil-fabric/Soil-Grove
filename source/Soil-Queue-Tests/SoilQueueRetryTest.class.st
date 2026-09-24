@@ -202,13 +202,13 @@ SoilQueueRetryTest >> testAnEntryThatKeepsFailingGivesUpAfterItsBudget [
 { #category : #tests }
 SoilQueueRetryTest >> testTheBackoffDoublesUpToItsCap [
 
-	| description |
-	description := SoilQueueDescription new
+	| settings |
+	settings := (SoilQueueDescription new
 		backoffBase: 1 second;
 		backoffCap: 5 seconds;
-		yourself.
+		yourself) settings.
 	self
-		assert: ((1 to: 5) collect: [ :retries | description retryDelayAfter: retries ]) asArray
+		assert: ((1 to: 5) collect: [ :retries | settings retryDelayAfter: retries ]) asArray
 		equals: { 1 second. 2 seconds. 4 seconds. 5 seconds. 5 seconds }
 ]
 

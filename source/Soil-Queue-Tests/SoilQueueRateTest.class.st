@@ -110,6 +110,26 @@ SoilQueueRateTest >> tearDown [
 ]
 
 { #category : #tests }
+SoilQueueRateTest >> testAChangedRateHoldsFromTheNextStart [
+	"the settings are read when the queue starts, not at every question. A rate set on the
+	description while the queue runs is the configuration of its next start -- a restart
+	of the resident is how it takes effect, the way it is for every resident"
+
+	| queue txn |
+	queue := self queue.
+	self rate: 1 per: 1 minute.
+	self putDue: 3.
+	(SoilQueueWorker on: queue) run.
+	self assert: self left equals: 0.
+
+	txn := soil newTransaction.
+	[ queue prepareIn: txn ] ensure: [ txn abort ].
+	self putDue: 3.
+	(SoilQueueWorker on: queue) run.
+	self assert: self left equals: 2
+]
+
+{ #category : #tests }
 SoilQueueRateTest >> testARateHandsOutNoMoreThanItsLimitPerPeriod [
 
 	| queue |

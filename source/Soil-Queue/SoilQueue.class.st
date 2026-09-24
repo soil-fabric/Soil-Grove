@@ -40,7 +40,8 @@ Class {
 		'workers',
 		'clock',
 		'wakeAt',
-		'rateCounter'
+		'rateCounter',
+		'settings'
 	],
 	#category : #'Soil-Queue'
 }
@@ -51,7 +52,7 @@ SoilQueue class >> soilTransientInstVars [
 	superclass's rather than adding to it, and a forgotten one would drag a process or a
 	semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt rateCounter )
+	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt rateCounter settings )
 ]
 
 { #category : #adding }
@@ -106,14 +107,14 @@ SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
 			ifNone: [ :time | nextTime := time. nil ].
 		found ifNotNil: [
 			| free |
-			free := self rateFreeAt: aDateAndTime under: description.
+			free := self rateFreeAt: aDateAndTime.
 			free > aDateAndTime
 				ifTrue: [
 					nextTime := free.
 					found := nil ]
 				ifFalse: [
 					inFlight add: found.
-					self noteIssueAt: aDateAndTime under: description ] ].
+					self noteIssueAt: aDateAndTime ] ].
 		found ].
 	^ key ifNil: [ aBlock cull: nextTime ]
 ]
@@ -148,11 +149,11 @@ SoilQueue >> book: anError for: aKey [
 		description := self descriptionIn: txn.
 		entry := description entryAt: aKey.
 		((entry classifyError: anError) == #retriable
-			and: [ description allowsFailureRetryOf: entry ])
+			and: [ settings allowsFailureRetryOf: entry ])
 			ifTrue: [
 				entry noteFailure.
 				entry eligibleAt: self now
-					+ (entry retryDelayAfter: entry failureRetries under: description).
+					+ (entry retryDelayAfter: entry failureRetries under: settings).
 				entry releaseClaim.
 				description moveKey: aKey for: entry ]
 			ifFalse: [
@@ -245,11 +246,11 @@ SoilQueue >> nextDueTime [
 ]
 
 { #category : #rate }
-SoilQueue >> noteIssueAt: aDateAndTime under: aDescription [
+SoilQueue >> noteIssueAt: aDateAndTime [
 	"an entry went out, and counts against the rate for its period. Nothing to count
 	without a rate"
 
-	aDescription rateLimit ifNil: [ ^ self ].
+	settings rateLimit ifNil: [ ^ self ].
 	mutex critical: [ rateCounter noteIssueAt: aDateAndTime ]
 ]
 
@@ -286,40 +287,47 @@ SoilQueue >> prepareIn: aTransaction [
 
 	This only raises the flag; the first work unit does the rest. An entry that is not due
 	yet raises it too: the step that finds nothing due is the one that reads when it will
-	be, and the dispatcher sleeps until then."
+	be, and the dispatcher sleeps until then.
 
-	((self descriptionIn: aTransaction) nextDueTimeAt: self now)
+	It is also where the settings are read. A start is 'read the configuration, then run',
+	for a restart as much as for the first one, so a setting changed on the description
+	holds from the next start on and not from the middle of a run."
+
+	| description |
+	description := self descriptionIn: aTransaction.
+	settings := description settings.
+	(description nextDueTimeAt: self now)
 		ifNotNil: [ self noteWork ]
 ]
 
 { #category : #rate }
-SoilQueue >> rateAllowanceAt: aDateAndTime under: aDescription [
+SoilQueue >> rateAllowanceAt: aDateAndTime [
 	"how many entries the rate lets out at aDateAndTime. Without a rate there is no bound of
 	its own, and the worker limit is answered -- the one that decides then anyway"
 
-	^ aDescription rateLimit
-		ifNil: [ aDescription workerLimit ]
+	^ settings rateLimit
+		ifNil: [ settings workerLimit ]
 		ifNotNil: [ :limit |
 			mutex critical: [
 				rateCounter
 					allowanceAt: aDateAndTime
 					limit: limit
-					period: aDescription ratePeriod ] ]
+					period: settings ratePeriod ] ]
 ]
 
 { #category : #rate }
-SoilQueue >> rateFreeAt: aDateAndTime under: aDescription [
+SoilQueue >> rateFreeAt: aDateAndTime [
 	"from when the rate lets the next entry out: aDateAndTime itself when it has room, and
 	always without a rate"
 
-	^ aDescription rateLimit
+	^ settings rateLimit
 		ifNil: [ aDateAndTime ]
 		ifNotNil: [ :limit |
 			mutex critical: [
 				rateCounter
 					freeAt: aDateAndTime
 					limit: limit
-					period: aDescription ratePeriod ] ]
+					period: settings ratePeriod ] ]
 ]
 
 { #category : #recovery }
@@ -343,7 +351,7 @@ SoilQueue >> recover: aKey [
 		entry := description entryAt: aKey.
 		entry isClaimed ifFalse: [ ^ self ].
 		entry resumption == #compensating ifTrue: [ entry compensateIn: txn ].
-		(description allowsOrphanedRetryOf: entry)
+		(settings allowsOrphanedRetryOf: entry)
 			ifTrue: [
 				entry noteOrphaned.
 				entry releaseClaim ]
@@ -399,7 +407,7 @@ SoilQueue >> rememberNextDueTime [
 		description := self descriptionIn: txn.
 		now := self now.
 		(description nextDueTimeAt: now) ifNotNil: [ :due |
-			due max: (self rateFreeAt: now under: description) ] ].
+			due max: (self rateFreeAt: now) ] ].
 	(time notNil and: [ time > self now ]) ifFalse: [ ^ self ].
 	mutex critical: [
 		wakeAt := wakeAt
@@ -428,6 +436,19 @@ SoilQueue >> runStrategyClass [
 	^ SoilQueueRunStrategy
 ]
 
+{ #category : #accessing }
+SoilQueue >> settings [
+	"how often and how fast I run, as it stood when I started"
+
+	^ settings
+]
+
+{ #category : #accessing }
+SoilQueue >> settings: aSettings [
+
+	settings := aSettings
+]
+
 { #category : #running }
 SoilQueue >> startWorker [
 
@@ -453,9 +474,9 @@ SoilQueue >> startWorkersForWhatIsDue [
 		| description now |
 		description := self descriptionIn: txn.
 		now := self now.
-		((description dueCountAt: now upTo: description workerLimit)
-			min: description workerLimit)
-			min: (self rateAllowanceAt: now under: description) ].
+		((description dueCountAt: now upTo: settings workerLimit)
+			min: settings workerLimit)
+			min: (self rateAllowanceAt: now) ].
 	running := mutex critical: [ workers size ].
 	(wanted - running) timesRepeat: [ self startWorker ]
 ]

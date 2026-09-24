@@ -74,23 +74,6 @@ SoilQueueDescription >> add: anEntry [
 	^ key asIndexKeyOfSize: strategy range keySize
 ]
 
-{ #category : #retrying }
-SoilQueueDescription >> allowsFailureRetryOf: anEntry [
-	"whether an entry whose work unit failed retriably may be tried once more. With a limit
-	of three, three retries happen and the fourth failure is the one that gives up"
-
-	^ anEntry failureRetries < self failureRetryLimit
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> allowsOrphanedRetryOf: anEntry [
-	"whether an entry that lost its worker may be given back once more. Counted like the
-	restarts of a resident: with a limit of two, two orphaned entries come back and the
-	third orphaning is the one that parks it"
-
-	^ orphanedRetryLimit isNil or: [ anEntry orphanedRetries < orphanedRetryLimit ]
-]
-
 { #category : #converting }
 SoilQueueDescription >> appendKeyPartsFor: anEntry on: aWriteStream [
 	"the embedder's link in the chain, and the place a section inside one queue is marked.
@@ -291,10 +274,13 @@ SoilQueueDescription >> name [
 { #category : #'instance creation' }
 SoilQueueDescription >> newInstanceIn: aTransaction [
 	"the name goes along, so the live queue can answer for itself what it is called
-	without opening a transaction for a label"
+	without opening a transaction for a label. So do the settings, as they stand now:
+	a queue that is created and never started still runs by them, and a start reads
+	them again"
 
 	^ (super newInstanceIn: aTransaction)
 		name: name;
+		settings: self settings;
 		yourself
 ]
 
@@ -417,20 +403,20 @@ SoilQueueDescription >> removeKey: aKey [
 	^ strategy index removeKey: aKey
 ]
 
-{ #category : #retrying }
-SoilQueueDescription >> retryDelayAfter: anInteger [
-	"the pause before retry number anInteger: the base, doubled for every failure before
-	it, never longer than the cap"
-
-	^ (self backoffBase * (2 raisedTo: anInteger - 1)) min: self backoffCap
-]
-
 { #category : #initialization }
 SoilQueueDescription >> setName: aSymbol strategy: aStrategy format: aFormat [
 
 	name := aSymbol.
 	strategy := aStrategy.
 	format := aFormat
+]
+
+{ #category : #accessing }
+SoilQueueDescription >> settings [
+	"what a queue runs by, taken from me as I stand now. I keep and change the values; the
+	queue reads them when it starts"
+
+	^ SoilQueueSettings from: self
 ]
 
 { #category : #accessing }
