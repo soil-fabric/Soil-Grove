@@ -200,10 +200,11 @@ SoilQueueDescription >> setName: aSymbol workspace: aQueueWorkspace [
 
 { #category : #accessing }
 SoilQueueDescription >> workerLimit [
-	"how many workers may run at once. One unless the embedder says otherwise, and that is
-	the cautious direction: in Pharo processes are green threads, so more of them buy
-	overlap during waiting and latency isolation between a long entry and a short one, never
-	throughput. Against a backlog the answer is a different rate, not more workers."
+	"how many workers may run at once: the size of the worker pool all lanes share. One
+	unless the embedder says otherwise, and that is the cautious direction: in Pharo
+	processes are green threads, so more of them buy overlap during waiting and latency
+	isolation between a long entry and a short one, never throughput. Against a backlog
+	the answer is a different rate, not more workers."
 
 	^ workerLimit ifNil: [ 1 ]
 ]
