@@ -26,6 +26,10 @@ again at every start. After that I read no configuration: a changed setting hold
 next start on. Without a resident, whoever creates me on a workspace (#onWorkspace:in:)
 sets the values on the lanes in code.
 
+Every lane draws its workers from a worker pool, a count of places; lanes may share one,
+and by default all of them do. Before I start a worker for a lane there has to be a place
+free in its pool -- if there is none, I start none and try again at the next wake.
+
 Three roles, and the point of them is what each may not do. I hand out, and that is the
 only place an entry is chosen. My process is the dispatcher: a step decides how many
 workers there should be and when to wake next, and does no work itself. A QueueWorker
@@ -47,8 +51,7 @@ Class {
 		'workers',
 		'clock',
 		'wakeAt',
-		'lanes',
-		'workerLimit'
+		'lanes'
 	],
 	#category : #'Soil-Queue'
 }
@@ -226,17 +229,20 @@ SoilQueue >> clock: aClock [
 { #category : #configuring }
 SoilQueue >> configureFrom: aDescription in: aTransaction [
 	"build my lanes from the lanes stored in my workspace, each configured from
-	aDescription, and take my worker limit from it. Called when I am created and at every
-	start, and only then: after that nobody reads the configuration for me.
+	aDescription, all drawing on one worker pool the size of its worker limit. Called when
+	I am created and at every start, and only then: after that nobody reads the
+	configuration for me.
 
 	The lanes are built anew, and with them their count of what went out lately -- a
 	restart that forgets it lets at most one period's worth out early"
 
-	| workspace |
+	| workspace pool |
 	workspace := self workspaceIn: aTransaction.
-	workerLimit := aDescription workerLimit.
+	pool := SoilQueueWorkerPool named: #default size: aDescription workerLimit.
 	lanes := workspace lanes collect: [ :each |
-		SoilQueueLane named: each name configuredFrom: aDescription ]
+		(SoilQueueLane named: each name configuredFrom: aDescription)
+			pool: pool;
+			yourself ]
 ]
 
 { #category : #working }
@@ -264,6 +270,15 @@ SoilQueue >> forgetWakeTime [
 	mutex critical: [ wakeAt := nil ]
 ]
 
+{ #category : #running }
+SoilQueue >> freePlacesIn: aWorkerPool [
+	"how many places of a pool are not taken, counted off the workers that are running --
+	by name, so that a worker of a lane from before a start still counts"
+
+	^ aWorkerPool size - (mutex critical: [
+		workers count: [ :each | each lane pool name = aWorkerPool name ] ])
+]
+
 { #category : #initialization }
 SoilQueue >> initialize [
 
@@ -272,8 +287,7 @@ SoilQueue >> initialize [
 	inFlight := Set new.
 	workers := IdentitySet new.
 	recovered := false.
-	lanes := #(  ).
-	workerLimit := 1
+	lanes := #(  )
 ]
 
 { #category : #testing }
@@ -353,6 +367,23 @@ SoilQueue >> now [
 	^ clock
 		ifNil: [ DateAndTime now ]
 		ifNotNil: [ :aClock | aClock now ]
+]
+
+{ #category : #accessing }
+SoilQueue >> pool: aSymbol [
+	"the worker pool of that name, for whoever sets its size in code"
+
+	^ self pools
+		detect: [ :each | each name = aSymbol ]
+		ifNone: [ self error: 'no worker pool named ', aSymbol printString ]
+]
+
+{ #category : #accessing }
+SoilQueue >> pools [
+	"the worker pools my lanes draw on. There is no list of them besides: a pool no lane
+	draws on has nothing to count"
+
+	^ (lanes collect: [ :each | each pool ]) asIdentitySet asArray
 ]
 
 { #category : #running }
@@ -509,25 +540,24 @@ SoilQueue >> startWorkersForWhatIsDue [
 	working takes. Nor for more than a lane's rate lets out right now: a worker started for
 	an entry that may not go yet would only end again at once.
 
-	The limit is one for all my workers together. A lane that already has workers running
-	gets that many fewer new ones."
+	Every worker takes a place in the pool of its lane, and a lane gets no more than its
+	pool has free -- lanes that share a pool share its places. A lane that already has
+	workers running gets that many fewer new ones."
 
-	| free |
 	self shouldStop ifTrue: [ ^ self ].
-	free := workerLimit - (mutex critical: [ workers size ]).
 	lanes do: [ :lane |
+		| free |
+		free := self freePlacesIn: lane pool.
 		free > 0 ifTrue: [
 			| wanted running |
 			wanted := self withTransactionDo: [ :txn |
 				| workspace now |
 				workspace := self workspaceIn: txn.
 				now := self now.
-				(workspace dueCountAt: now in: (workspace laneNamed: lane name) upTo: workerLimit)
-					min: (mutex critical: [ lane rateAllowanceAt: now ifNone: [ workerLimit ] ]) ].
-			running := mutex critical: [ workers count: [ :each | each lane == lane ] ].
-			((wanted - running) min: free) timesRepeat: [
-				self startWorkerFor: lane.
-				free := free - 1 ] ] ]
+				(workspace dueCountAt: now in: (workspace laneNamed: lane name) upTo: lane pool size)
+					min: (mutex critical: [ lane rateAllowanceAt: now ifNone: [ lane pool size ] ]) ].
+			running := mutex critical: [ workers count: [ :each | each lane name = lane name ] ].
+			((wanted - running) min: free) timesRepeat: [ self startWorkerFor: lane ] ] ]
 ]
 
 { #category : #stopping }
@@ -599,20 +629,6 @@ SoilQueue >> workerFinished: aWorker [
 	it: the queue stops handing out and the workers run dry"
 
 	mutex critical: [ workers remove: aWorker ifAbsent: [ nil ] ]
-]
-
-{ #category : #accessing }
-SoilQueue >> workerLimit [
-	"how many of my workers may run at once, over all my lanes"
-
-	^ workerLimit
-]
-
-{ #category : #accessing }
-SoilQueue >> workerLimit: anInteger [
-
-	anInteger < 1 ifTrue: [ ^ self error: 'a queue with no worker would never run' ].
-	workerLimit := anInteger
 ]
 
 { #category : #accessing }

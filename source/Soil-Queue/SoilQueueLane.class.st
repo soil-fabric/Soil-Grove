@@ -2,7 +2,8 @@
 The live half of a lane: how fast it runs, and what it decides about its entries.
 
 A lane is a place the queue hands entries out from, with a pace of its own -- a rate, a
-retry budget, a backoff. Its stored half, SoilQueueLaneDescription, lies in the workspace
+retry budget, a backoff -- and a worker pool it draws its workers from, which it may share
+with other lanes. Its stored half, SoilQueueLaneDescription, lies in the workspace
 and says where its entries are; I say how they go out. The queue builds me from both when
 it is created and again at every start, and after that nobody reads the configuration
 for me: a changed setting holds from the next start on, the way it does for a resident.
@@ -27,7 +28,8 @@ Class {
 		'orphanedRetryLimit',
 		'backoffBase',
 		'backoffCap',
-		'rateCounter'
+		'rateCounter',
+		'pool'
 	],
 	#category : #'Soil-Queue'
 }
@@ -127,6 +129,19 @@ SoilQueueLane >> orphanedRetryLimit: anInteger [
 	(anInteger notNil and: [ anInteger < 0 ]) ifTrue: [
 		^ self error: 'a negative number of retries cannot be used up' ].
 	orphanedRetryLimit := anInteger
+]
+
+{ #category : #accessing }
+SoilQueueLane >> pool [
+	"the worker pool my workers take their places in"
+
+	^ pool
+]
+
+{ #category : #accessing }
+SoilQueueLane >> pool: aWorkerPool [
+
+	pool := aWorkerPool
 ]
 
 { #category : #printing }
