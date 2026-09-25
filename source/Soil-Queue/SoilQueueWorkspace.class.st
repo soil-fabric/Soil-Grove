@@ -401,6 +401,29 @@ SoilQueueWorkspace >> removeKey: aKey [
 	^ index removeKey: aKey
 ]
 
+{ #category : #lanes }
+SoilQueueWorkspace >> removeLaneNamed: aSymbol discardingEntries: aBoolean [
+	"take a lane out, and its marker is free again. Only an empty one, unless aBoolean says
+	to take its entries and dead letters along -- parked work is otherwise never deleted,
+	and a lane that goes must leave nothing under its marker for the next lane to find.
+
+	The default lane stays. In the transaction I was read in; I do not commit"
+
+	| lane keys parked |
+	lane := self laneNamed: aSymbol.
+	lane == self defaultLane ifTrue: [ ^ self error: 'the default lane cannot be removed' ].
+	keys := OrderedCollection new.
+	self keysAndEntriesIn: lane do: [ :key :entry | keys add: key ].
+	parked := OrderedCollection new.
+	self deadLettersDo: [ :key :entry | (lane includesKey: key) ifTrue: [ parked add: key ] ].
+	(aBoolean not and: [ keys notEmpty or: [ parked notEmpty ] ]) ifTrue: [
+		^ self error: 'the lane ' , aSymbol printString , ' still has ' , keys size printString
+			, ' entries and ' , parked size printString , ' dead letters' ].
+	keys do: [ :each | index removeKey: each ].
+	parked do: [ :each | deadLetters removeKey: each ].
+	lanes remove: lane
+]
+
 { #category : #initialization }
 SoilQueueWorkspace >> setIndex: aSoilIndexedDictionary keySize: keySizeInBytes lanes: aCollection [
 
