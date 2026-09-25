@@ -90,6 +90,24 @@ SoilQueue >> add: anEntry in: aTransaction [
 	^ (self workspaceIn: aTransaction) add: anEntry
 ]
 
+{ #category : #lanes }
+SoilQueue >> addLane: aSymbol format: aFormat [
+	"a lane more, stored in my workspace under the next free marker and handed out from at
+	once -- a lane that took entries and handed nothing out until the next start would only
+	collect them. Until that start configures it, it runs like my default lane and draws
+	on its pool. Answers the live lane"
+
+	| lane |
+	self withTransactionDo: [ :txn |
+		(self workspaceIn: txn) addLaneNamed: aSymbol format: aFormat.
+		txn commit ].
+	lane := (SoilQueueLane named: aSymbol configuredFrom: self defaultLane)
+		pool: self defaultLane pool;
+		yourself.
+	lanes := lanes copyWith: lane.
+	^ lane
+]
+
 { #category : #working }
 SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
 	"the same for my first lane"

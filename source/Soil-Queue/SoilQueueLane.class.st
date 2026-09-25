@@ -69,9 +69,21 @@ SoilQueueLane >> allowsOrphanedRetryOf: anEntry [
 ]
 
 { #category : #retrying }
+SoilQueueLane >> backoffBase [
+
+	^ backoffBase
+]
+
+{ #category : #retrying }
 SoilQueueLane >> backoffBase: aDuration [
 
 	backoffBase := aDuration
+]
+
+{ #category : #retrying }
+SoilQueueLane >> backoffCap [
+
+	^ backoffCap
 ]
 
 { #category : #retrying }
@@ -83,7 +95,8 @@ SoilQueueLane >> backoffCap: aDuration [
 { #category : #initialization }
 SoilQueueLane >> configureFrom: aDescription [
 	"take my values off a description, defaults included. Called when the queue is created
-	and at every start -- and only then"
+	and at every start -- and only then. Another lane answers the same, which is how a lane
+	added to a running queue starts out like the default lane"
 
 	rateLimit := aDescription rateLimit.
 	ratePeriod := aDescription ratePeriod.
@@ -91,6 +104,12 @@ SoilQueueLane >> configureFrom: aDescription [
 	orphanedRetryLimit := aDescription orphanedRetryLimit.
 	backoffBase := aDescription backoffBase.
 	backoffCap := aDescription backoffCap
+]
+
+{ #category : #retrying }
+SoilQueueLane >> failureRetryLimit [
+
+	^ failureRetryLimit
 ]
 
 { #category : #retrying }
@@ -121,6 +140,12 @@ SoilQueueLane >> noteIssueAt: aDateAndTime [
 
 	rateLimit ifNil: [ ^ self ].
 	rateCounter noteIssueAt: aDateAndTime
+]
+
+{ #category : #retrying }
+SoilQueueLane >> orphanedRetryLimit [
+
+	^ orphanedRetryLimit
 ]
 
 { #category : #retrying }
@@ -174,12 +199,24 @@ SoilQueueLane >> rateFreeAt: aDateAndTime [
 ]
 
 { #category : #rate }
+SoilQueueLane >> rateLimit [
+
+	^ rateLimit
+]
+
+{ #category : #rate }
 SoilQueueLane >> rateLimit: anInteger per: aDuration [
 	"no more than anInteger entries handed out in any period of aDuration"
 
 	anInteger < 1 ifTrue: [ ^ self error: 'a rate that lets nothing out would stop the lane' ].
 	rateLimit := anInteger.
 	ratePeriod := aDuration
+]
+
+{ #category : #rate }
+SoilQueueLane >> ratePeriod [
+
+	^ ratePeriod
 ]
 
 { #category : #retrying }
