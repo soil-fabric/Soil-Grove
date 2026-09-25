@@ -247,20 +247,24 @@ SoilQueue >> clock: aClock [
 { #category : #configuring }
 SoilQueue >> configureFrom: aDescription in: aTransaction [
 	"build my lanes from the lanes stored in my workspace, each configured from
-	aDescription, all drawing on one worker pool the size of its worker limit. Called when
-	I am created and at every start, and only then: after that nobody reads the
-	configuration for me.
+	aDescription -- the values for all lanes first, then its own -- and drawing on the
+	worker pool named for it. Lanes named for one pool share one. Called when I am created
+	and at every start, and only then: after that nobody reads the configuration for me.
 
 	The lanes are built anew, and with them their count of what went out lately -- a
 	restart that forgets it lets at most one period's worth out early"
 
-	| workspace pool |
+	| workspace pools |
 	workspace := self workspaceIn: aTransaction.
-	pool := SoilQueueWorkerPool named: #default size: aDescription workerLimit.
+	pools := Dictionary new.
 	lanes := workspace lanes collect: [ :each |
-		(SoilQueueLane named: each name configuredFrom: aDescription)
-			pool: pool;
-			yourself ]
+		| lane poolName |
+		lane := SoilQueueLane named: each name configuredFrom: aDescription.
+		aDescription configureLane: lane.
+		poolName := aDescription workerPoolForLane: each name.
+		lane pool: (pools at: poolName ifAbsentPut: [
+			SoilQueueWorkerPool named: poolName size: (aDescription sizeOfWorkerPool: poolName) ]).
+		lane ]
 ]
 
 { #category : #working }
