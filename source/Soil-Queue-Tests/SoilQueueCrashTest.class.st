@@ -49,7 +49,7 @@ SoilQueueCrashTest >> deadLetters [
 	| txn letters |
 	txn := soil newTransaction.
 	letters := OrderedCollection new.
-	[ (self descriptionIn: txn) deadLettersDo: [ :key :entry |
+	[ (self workspaceIn: txn) deadLettersDo: [ :key :entry |
 		letters add: { key. entry state. entry orphanedRetries } ] ]
 		ensure: [ txn abort ].
 	^ letters asArray
@@ -69,7 +69,7 @@ SoilQueueCrashTest >> entryAt: aKey do: aBlock [
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ ((self descriptionIn: txn) entryAt: aKey ifAbsent: [ nil ])
+	^ [ ((self workspaceIn: txn) entryAt: aKey ifAbsent: [ nil ])
 		ifNotNil: [ :entry | aBlock value: entry ] ]
 		ensure: [ txn abort ]
 ]
@@ -104,7 +104,7 @@ SoilQueueCrashTest >> put: aBlock [
 	"aBlock builds the entry on the target read in the same transaction"
 
 	^ self inTransaction: [ :txn |
-		(self descriptionIn: txn) add: (aBlock value: (txn root at: #target)) ]
+		(self workspaceIn: txn) add: (aBlock value: (txn root at: #target)) ]
 ]
 
 { #category : #helpers }
@@ -339,4 +339,11 @@ SoilQueueCrashTest >> workOneUnit [
 	"exactly one entry, so a test can look in between"
 
 	^ (SoilQueueWorker on: self queue) runOnce
+]
+
+{ #category : #helpers }
+SoilQueueCrashTest >> workspaceIn: aTransaction [
+	"where the entries are: the workspace the description holds"
+
+	^ (self descriptionIn: aTransaction) workspace
 ]

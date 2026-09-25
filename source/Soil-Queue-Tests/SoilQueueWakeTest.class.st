@@ -42,7 +42,7 @@ SoilQueueWakeTest >> keys [
 	| txn keys |
 	txn := soil newTransaction.
 	keys := OrderedCollection new.
-	[ (self descriptionIn: txn) keysAndEntriesDo: [ :key :entry | keys add: key ] ]
+	[ (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry | keys add: key ] ]
 		ensure: [ txn abort ].
 	^ keys asArray
 ]
@@ -69,7 +69,7 @@ SoilQueueWakeTest >> put: anEntry [
 	| txn |
 	txn := soil newTransaction.
 	^ [ | key |
-	  key := (self descriptionIn: txn) add: anEntry.
+	  key := (self workspaceIn: txn) add: anEntry.
 	  txn commit.
 	  key ]
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
@@ -124,7 +124,7 @@ SoilQueueWakeTest >> stateAndDueTimeAt: aKey [
 	| txn |
 	txn := soil newTransaction.
 	^ [ | entry |
-	  entry := (self descriptionIn: txn) entryAt: aKey.
+	  entry := (self workspaceIn: txn) entryAt: aKey.
 	  { entry state. entry eligibleAt } ]
 		ensure: [ txn abort ]
 ]
@@ -306,4 +306,11 @@ SoilQueueWakeTest >> waitUntil: aBlock [
 	[ aBlock value ] whileFalse: [
 		DateAndTime now > deadline ifTrue: [ ^ self fail: 'the queue did not get there' ].
 		10 milliSeconds asDelay wait ]
+]
+
+{ #category : #helpers }
+SoilQueueWakeTest >> workspaceIn: aTransaction [
+	"where the entries are: the workspace the description holds"
+
+	^ (self descriptionIn: aTransaction) workspace
 ]

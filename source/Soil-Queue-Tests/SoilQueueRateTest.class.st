@@ -46,7 +46,7 @@ SoilQueueRateTest >> left [
 	| txn count |
 	txn := soil newTransaction.
 	count := 0.
-	[ (self descriptionIn: txn) keysAndEntriesDo: [ :key :entry | count := count + 1 ] ]
+	[ (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry | count := count + 1 ] ]
 		ensure: [ txn abort ].
 	^ count
 ]
@@ -62,7 +62,7 @@ SoilQueueRateTest >> putDue: anInteger [
 
 	self inTransaction: [ :txn |
 		anInteger timesRepeat: [
-			(self descriptionIn: txn) add: ((SoilQueueTestEntry on: 'work')
+			(self workspaceIn: txn) add: ((SoilQueueTestEntry on: 'work')
 				eligibleAt: clock now;
 				yourself) ] ]
 ]
@@ -176,4 +176,11 @@ SoilQueueRateTest >> testARateOfNothingIsRefused [
 	description := SoilQueueDescription new.
 	self should: [ description rateLimit: 0 per: 1 minute ] raise: Error.
 	self assert: description rateLimit isNil
+]
+
+{ #category : #helpers }
+SoilQueueRateTest >> workspaceIn: aTransaction [
+	"where the entries are: the workspace the description holds"
+
+	^ (self descriptionIn: aTransaction) workspace
 ]

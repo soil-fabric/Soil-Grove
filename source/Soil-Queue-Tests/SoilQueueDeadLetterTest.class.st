@@ -25,7 +25,7 @@ SoilQueueDeadLetterTest >> deadLetteredKeys [
 	| txn keys |
 	txn := soil newTransaction.
 	keys := OrderedCollection new.
-	^ [ (self descriptionIn: txn)
+	^ [ (self workspaceIn: txn)
 		deadLettersDo: [ :key :entry | keys add: key -> entry state ].
 	  keys asArray ]
 		ensure: [ txn abort ]
@@ -49,7 +49,7 @@ SoilQueueDeadLetterTest >> put: anEntry [
 	| txn |
 	txn := soil newTransaction.
 	^ [ | key |
-	  key := (self descriptionIn: txn) add: anEntry.
+	  key := (self workspaceIn: txn) add: anEntry.
 	  txn commit.
 	  key ]
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
@@ -86,7 +86,7 @@ SoilQueueDeadLetterTest >> stateOf: aKey [
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ ((self descriptionIn: txn) entryAt: aKey ifAbsent: [ nil ])
+	^ [ ((self workspaceIn: txn) entryAt: aKey ifAbsent: [ nil ])
 		ifNotNil: [ :entry | entry state ] ]
 		ensure: [ txn abort ]
 ]
@@ -178,4 +178,11 @@ SoilQueueDeadLetterTest >> workOneUnit [
 	"exactly one entry, so a test can look in between"
 
 	^ (SoilQueueWorker on: self queue) runOnce
+]
+
+{ #category : #helpers }
+SoilQueueDeadLetterTest >> workspaceIn: aTransaction [
+	"where the entries are: the workspace the description holds"
+
+	^ (self descriptionIn: aTransaction) workspace
 ]
