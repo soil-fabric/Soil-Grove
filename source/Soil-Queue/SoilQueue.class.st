@@ -149,6 +149,9 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aB
 	Under the mutex, because this is where competing workers meet. What crosses the
 	boundary is a key: the transaction this scanned in is not the one the work happens in.
 
+	Nothing goes out for a lane that has been removed; a worker the dispatcher started for it
+	just before runs dry.
+
 	The rate is checked here, at the outlet, because it is the lane's and not an entry's.
 	A due entry the rate does not let out yet is not handed out, and the time the rate has
 	room again is what aBlock hears -- so the worker that runs dry hands that on as the wake
@@ -157,6 +160,7 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aB
 	| key nextTime |
 	key := mutex critical: [
 		| workspace found |
+		(lanes includes: aLane) ifFalse: [ ^ aBlock cull: nil ].
 		workspace := self workspaceIn: aTransaction.
 		found := workspace
 			nextDueAt: aDateAndTime
@@ -519,6 +523,39 @@ SoilQueue >> rememberNextDueTime [
 		wakeAt := wakeAt
 			ifNil: [ time ]
 			ifNotNil: [ :current | current min: time ] ]
+]
+
+{ #category : #lanes }
+SoilQueue >> removeLane: aSymbol [
+	"take out a lane that has nothing left in it"
+
+	self removeLane: aSymbol discardingEntries: false
+]
+
+{ #category : #lanes }
+SoilQueue >> removeLane: aSymbol discardingEntries: aBoolean [
+	"take out a lane, from my workspace and from what I hand out from. Not while a worker of
+	it runs: it may be in the middle of an entry, and it runs dry by itself.
+
+	Out of what I hand out from first, under the mutex that handing out goes under, so that
+	nothing of it goes out from then on. If my workspace refuses -- entries left and aBoolean
+	false -- the lane comes back. The default lane stays: entries that name no lane go there,
+	and a lane added at runtime runs like it"
+
+	| lane |
+	lane := self lane: aSymbol.
+	lane == self defaultLane ifTrue: [ ^ self error: 'the default lane cannot be removed' ].
+	mutex critical: [
+		(workers anySatisfy: [ :each | each lane name = aSymbol ]) ifTrue: [
+			^ self error: 'the lane ' , aSymbol printString , ' still has workers running' ].
+		lanes := lanes copyWithout: lane ].
+	[ self withTransactionDo: [ :txn |
+		(self workspaceIn: txn) removeLaneNamed: aSymbol discardingEntries: aBoolean.
+		txn commit ] ]
+		on: Error
+		do: [ :refusal |
+			mutex critical: [ lanes := lanes copyWith: lane ].
+			refusal pass ]
 ]
 
 { #category : #running }
