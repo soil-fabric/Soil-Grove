@@ -1,5 +1,6 @@
 "
-One worker on a queue: ask for an entry, claim it, do it, give it back, ask again.
+One worker on a lane of a queue: ask for an entry, claim it, do it, give it back, ask
+again.
 
 I do not scan. Which entry is mine is the queue's decision and nobody else's -- I would
 otherwise have to know about the ordering, the section and what the others hold, and two
@@ -23,6 +24,7 @@ Class {
 	#superclass : #Object,
 	#instVars : [
 		'queue',
+		'lane',
 		'process',
 		'currentKey'
 	],
@@ -31,9 +33,16 @@ Class {
 
 { #category : #'instance creation' }
 SoilQueueWorker class >> on: aQueue [
+	"a worker of the queue's first lane"
+
+	^ self on: aQueue lane: aQueue defaultLane
+]
+
+{ #category : #'instance creation' }
+SoilQueueWorker class >> on: aQueue lane: aLane [
 
 	^ self new
-		setQueue: aQueue;
+		setQueue: aQueue lane: aLane;
 		yourself
 ]
 
@@ -51,9 +60,16 @@ SoilQueueWorker >> isRunning [
 ]
 
 { #category : #accessing }
+SoilQueueWorker >> lane [
+	"the lane I take entries from"
+
+	^ lane
+]
+
+{ #category : #accessing }
 SoilQueueWorker >> processName [
 
-	^ 'soil queue worker ' , queue name
+	^ 'soil queue worker ' , queue name , ' ' , lane name
 ]
 
 { #category : #running }
@@ -74,7 +90,7 @@ SoilQueueWorker >> runOnce [
 	queue and does not cost me: a transient failure must not cost a worker."
 
 	| key |
-	key := queue assignNext.
+	key := queue assignNextIn: lane.
 	key ifNil: [ ^ nil ].
 	currentKey := key.
 	[ [ queue claim: key.
@@ -88,9 +104,10 @@ SoilQueueWorker >> runOnce [
 ]
 
 { #category : #initialization }
-SoilQueueWorker >> setQueue: aQueue [
+SoilQueueWorker >> setQueue: aQueue lane: aLane [
 
-	queue := aQueue
+	queue := aQueue.
+	lane := aLane
 ]
 
 { #category : #running }

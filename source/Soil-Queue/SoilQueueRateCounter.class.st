@@ -1,5 +1,5 @@
 "
-What has gone out lately: the times at which a queue handed out entries, kept for as long
+What has gone out lately: the times at which a lane handed out entries, kept for as long
 as they still count against its rate. That is any period of the given length, not the
 minute on the clock -- an entry handed out half a minute ago still counts half a minute
 from now.
@@ -8,10 +8,10 @@ I live in memory and only there. A counter in the store would be a structure eve
 writes to, which under MVCC is where write conflicts come from; and a restart that forgets
 what went out lately lets at most one period's worth out early.
 
-The limit and the period are not mine. They belong to the description and are passed in
-with every question, so a changed setting holds from the next question on. That also keeps
-me small enough that a queue could hold several of me, one per key of its entries, without
-anything else changing.
+The limit and the period are not mine. They belong to the lane that holds me -- one
+counter per lane, since two lanes with two rates must not share a count -- and are passed
+in with every question. The lane took them from its configuration when the queue started,
+so a changed setting holds from the next start on.
 
 Asked under the queue's mutex, like everything that competing workers meet at.
 "
