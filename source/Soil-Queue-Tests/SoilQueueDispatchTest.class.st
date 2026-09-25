@@ -195,15 +195,22 @@ SoilQueueDispatchTest >> testAnEntryWhoseWorkThrowsIsNotHandedStraightBack [
 { #category : #tests }
 SoilQueueDispatchTest >> testNoMoreWorkersThanTheLimit [
 	"the number of waiting entries says how long the working takes, not how many workers
-	are needed"
+	are needed.
 
-	| queue |
+	Counted as started, not as running: a forked worker can work its way through and be
+	gone again before the count is read. So they are not forked, and the test runs them"
+
+	| queue started |
 	self workerLimit: 2.
 	5 timesRepeat: [
 		self put: [ :target | SoilQueueTestRepeatingEntry on: target ] ].
-	queue := self queue.
+	queue := SoilQueueTestUnforkedQueue from: self queue.
 	queue runStep.
-	self assert: queue workers size equals: 2
+	started := queue workers.
+	started do: [ :each | each run ].
+
+	self assert: started size equals: 2.
+	self assert: self targetEffects equals: (Array new: 5 withAll: #ran)
 ]
 
 { #category : #tests }
