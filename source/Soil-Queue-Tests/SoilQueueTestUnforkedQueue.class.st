@@ -9,7 +9,7 @@ Class {
 }
 
 { #category : #running }
-SoilQueueTestUnforkedQueue >> startWorker [
+SoilQueueTestUnforkedQueue >> startWorkerFor: aLane [
 
-	self workerStarting: (SoilQueueWorker on: self)
+	self workerStarting: (SoilQueueWorker on: self lane: aLane)
 ]

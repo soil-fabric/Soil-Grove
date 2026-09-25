@@ -91,7 +91,7 @@ SoilQueueWorkspaceTest >> testAKeyCarriesTheDueTimeInFrontOfTheId [
 	| description entry key |
 	description := self addQueueNamed: #work.
 	entry := self entryDueIn: 0 seconds.
-	key := description workspace keyFor: entry.
+	key := description workspace defaultLane keyFor: entry.
 	self assert: key size equals: 24.
 	self assert: (key copyFrom: 9 to: 16) equals: entry id.
 	self
@@ -177,16 +177,18 @@ SoilQueueWorkspaceTest >> testTakingAnEntryOutLeavesTheNextOne [
 
 { #category : #tests }
 SoilQueueWorkspaceTest >> testTheWorkspaceBringsItsShapeBackFromDisk [
-	"the workspace carries its index's shape itself -- key size, marker width, format --
-	so a queue created on it works wherever it turns up"
+	"the workspace carries its index's shape itself -- key size, and for each lane its
+	marker width and format -- so a queue created on it works wherever it turns up. A new
+	workspace has one lane, #default"
 
 	| txn workspace |
 	self addQueueNamed: #work.
 	txn := soil newTransaction.
 	workspace := self workspaceIn: txn.
-	self assert: workspace format class equals: SoilQueueTimeOrderedKeyFormat.
-	self assert: workspace range keySize equals: 24.
-	self assert: workspace range width equals: 0.
+	self assert: (workspace lanes collect: [ :each | each name ]) equals: #( #default ).
+	self assert: workspace defaultLane format class equals: SoilQueueTimeOrderedKeyFormat.
+	self assert: workspace keySize equals: 24.
+	self assert: workspace defaultLane range width equals: 0.
 	txn abort
 ]
 

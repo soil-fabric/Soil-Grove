@@ -350,11 +350,11 @@ SoilQueueEntry >> resumption [
 ]
 
 { #category : #working }
-SoilQueueEntry >> retryDelayAfter: anInteger under: aDescription [
-	"how long to wait before retry number anInteger. The queue's curve by default; a
-	subclass whose kind of work wants a different pace answers its own"
+SoilQueueEntry >> retryDelayAfter: anInteger under: aLane [
+	"how long to wait before retry number anInteger. The curve of the lane I lie in by
+	default; a subclass whose kind of work wants a different pace answers its own"
 
-	^ aDescription retryDelayAfter: anInteger
+	^ aLane retryDelayAfter: anInteger
 ]
 
 { #category : #accessing }

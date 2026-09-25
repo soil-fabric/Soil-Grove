@@ -13,11 +13,18 @@ forces a supervisor on anyone: created and not started, I still hand out entries
 without a supervisor there are no competing workers for the mutex to arbitrate.
 
 Mine is what competing workers meet at, and all of it lives in memory only: the mutex,
-the set of keys that are out, the workers that are running, the wake time and the count
-of what went out lately against the rate. Keys, not entries -- an entry read in the
-transaction that selected it would already be a snapshot of an older moment in the
-transaction that works on it. For the same reason what I hand out is a key, and whoever
-takes it opens a transaction of its own.
+the set of keys that are out, the workers that are running, the wake time and my live
+lanes. Keys, not entries -- an entry read in the transaction that selected it would
+already be a snapshot of an older moment in the transaction that works on it. For the
+same reason what I hand out is a key, and whoever takes it opens a transaction of its
+own.
+
+I hand out per lane. A lane is a place entries go out from with a pace of its own; its
+stored half lies in my workspace, its live half -- the rate, the retry budget, the
+backoff, the count of what went out -- is a SoilQueueLane I build when I am created and
+again at every start. After that I read no configuration: a changed setting holds from the
+next start on. Without a resident, whoever creates me on a workspace (#onWorkspace:in:)
+sets the values on the lanes in code.
 
 Three roles, and the point of them is what each may not do. I hand out, and that is the
 only place an entry is chosen. My process is the dispatcher: a step decides how many
@@ -27,7 +34,7 @@ me -- I stop handing out, and the workers run dry.
 
 What happens to an entry is decided by the entry: whether a failure is worth retrying,
 what holds after a crash, what giving up means for its target. How often and how fast is
-my description's -- the retry budget, the backoff and the rate.
+the lane's -- the retry budget, the backoff and the rate.
 "
 Class {
 	#name : #SoilQueue,
@@ -40,10 +47,28 @@ Class {
 		'workers',
 		'clock',
 		'wakeAt',
-		'rateCounter'
+		'lanes',
+		'workerLimit'
 	],
 	#category : #'Soil-Queue'
 }
+
+{ #category : #'instance creation' }
+SoilQueue class >> onWorkspace: aQueueWorkspace in: aTransaction [
+	"a queue without a resident: created on its workspace, with the default configuration
+	on every lane. Whoever does this sets the values in code -- on the lanes and the worker
+	limit -- and drives the queue itself, or starts it.
+
+	A supervisor of its own comes along, for the transactions the queue opens and the
+	lines it emits. It supervises nothing: the queue is not registered anywhere"
+
+	^ self new
+		name: #queue;
+		supervisor: aTransaction soil newResidentSupervisor;
+		workspaceId: (aTransaction objectIdOf: aQueueWorkspace);
+		configureFrom: SoilQueueDescription new in: aTransaction;
+		yourself
+]
 
 { #category : #accessing }
 SoilQueue class >> soilTransientInstVars [
@@ -51,7 +76,7 @@ SoilQueue class >> soilTransientInstVars [
 	superclass's rather than adding to it, and a forgotten one would drag a process or a
 	semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt rateCounter )
+	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt lanes )
 ]
 
 { #category : #adding }
@@ -63,9 +88,20 @@ SoilQueue >> add: anEntry in: aTransaction [
 ]
 
 { #category : #working }
-SoilQueue >> assignNext [
-	"what a worker asks for, and the only way it gets an entry -- it never looks at the
-	ordering itself.
+SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
+	"the same for my first lane"
+
+	^ self
+		assignNextIn: self defaultLane
+		dueAt: aDateAndTime
+		in: aTransaction
+		ifNone: aBlock
+]
+
+{ #category : #working }
+SoilQueue >> assignNextIn: aLane [
+	"what a worker of aLane asks for, and the only way it gets an entry -- it never looks at
+	the ordering itself.
 
 	nil means 'nothing for you', and a worker that hears it ends. That is also how a stop
 	arrives: the queue stops handing out, and the workers run dry by themselves. Nobody
@@ -79,41 +115,43 @@ SoilQueue >> assignNext [
 
 	self shouldStop ifTrue: [ ^ nil ].
 	^ self withTransactionDo: [ :txn |
-		self assignNextDueAt: self now in: txn ifNone: [ :time |
+		self assignNextIn: aLane dueAt: self now in: txn ifNone: [ :time |
 			time ifNotNil: [ self noteNextDueAt: time ].
 			nil ] ]
 ]
 
 { #category : #working }
-SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
-	"hand out the oldest due entry that nobody else holds, and remember that it is out.
+SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aBlock [
+	"hand out the oldest due entry of aLane that nobody else holds, and remember that it is
+	out.
 
 	Under the mutex, because this is where competing workers meet. What crosses the
 	boundary is a key: the transaction this scanned in is not the one the work happens in.
 
-	The rate is checked here, at the outlet, because it is the queue's and not an entry's.
+	The rate is checked here, at the outlet, because it is the lane's and not an entry's.
 	A due entry the rate does not let out yet is not handed out, and the time the rate has
 	room again is what aBlock hears -- so the worker that runs dry hands that on as the wake
 	time, just as it does the due time of an entry that is not due yet."
 
 	| key nextTime |
 	key := mutex critical: [
-		| description found |
-		description := self descriptionIn: aTransaction.
-		found := (self workspaceIn: aTransaction)
+		| workspace found |
+		workspace := self workspaceIn: aTransaction.
+		found := workspace
 			nextDueAt: aDateAndTime
+			in: (workspace laneNamed: aLane name)
 			skipping: inFlight
 			ifNone: [ :time | nextTime := time. nil ].
 		found ifNotNil: [
 			| free |
-			free := self rateFreeAt: aDateAndTime under: description.
+			free := aLane rateFreeAt: aDateAndTime.
 			free > aDateAndTime
 				ifTrue: [
 					nextTime := free.
 					found := nil ]
 				ifFalse: [
 					inFlight add: found.
-					self noteIssueAt: aDateAndTime under: description ] ].
+					aLane noteIssueAt: aDateAndTime ] ].
 		found ].
 	^ key ifNil: [ aBlock cull: nextTime ]
 ]
@@ -131,7 +169,8 @@ SoilQueue >> basicIsIdle [
 SoilQueue >> book: anError for: aKey [
 	"the work unit of an entry threw, and its transaction is gone. What is left to do is
 	mine, in a transaction of my own: ask the entry what the error means, and then either
-	put it off and count it, or give up on it.
+	put it off and count it, or give up on it. Whether it may be tried once more, and how
+	long it waits, is the lane's to say.
 
 	Put off: #failureRetries goes up, the due time moves out by the delay the entry asks
 	for, and the key moves with it -- the dispatcher reads the next wake time off the
@@ -144,16 +183,16 @@ SoilQueue >> book: anError for: aKey [
 
 	lastStepError := anError.
 	self withTransactionDo: [ :txn |
-		| description workspace entry |
-		description := self descriptionIn: txn.
+		| workspace lane entry |
 		workspace := self workspaceIn: txn.
+		lane := self laneFor: aKey in: workspace.
 		entry := workspace entryAt: aKey.
 		((entry classifyError: anError) == #retriable
-			and: [ description allowsFailureRetryOf: entry ])
+			and: [ lane allowsFailureRetryOf: entry ])
 			ifTrue: [
 				entry noteFailure.
 				entry eligibleAt: self now
-					+ (entry retryDelayAfter: entry failureRetries under: description).
+					+ (entry retryDelayAfter: entry failureRetries under: lane).
 				entry releaseClaim.
 				workspace moveKey: aKey for: entry ]
 			ifFalse: [
@@ -184,6 +223,22 @@ SoilQueue >> clock: aClock [
 	clock := aClock
 ]
 
+{ #category : #configuring }
+SoilQueue >> configureFrom: aDescription in: aTransaction [
+	"build my lanes from the lanes stored in my workspace, each configured from
+	aDescription, and take my worker limit from it. Called when I am created and at every
+	start, and only then: after that nobody reads the configuration for me.
+
+	The lanes are built anew, and with them their count of what went out lately -- a
+	restart that forgets it lets at most one period's worth out early"
+
+	| workspace |
+	workspace := self workspaceIn: aTransaction.
+	workerLimit := aDescription workerLimit.
+	lanes := workspace lanes collect: [ :each |
+		SoilQueueLane named: each name configuredFrom: aDescription ]
+]
+
 { #category : #working }
 SoilQueue >> conflictLimit [
 	"how often the same work unit is tried again after a write conflict before the conflict
@@ -192,6 +247,13 @@ SoilQueue >> conflictLimit [
 	trying for ever would hide it."
 
 	^ 3
+]
+
+{ #category : #accessing }
+SoilQueue >> defaultLane [
+	"my first lane -- the only one until I have more"
+
+	^ lanes first
 ]
 
 { #category : #waking }
@@ -210,7 +272,8 @@ SoilQueue >> initialize [
 	inFlight := Set new.
 	workers := IdentitySet new.
 	recovered := false.
-	rateCounter := SoilQueueRateCounter new
+	lanes := #(  ).
+	workerLimit := 1
 ]
 
 { #category : #testing }
@@ -219,6 +282,28 @@ SoilQueue >> isHolding: aKey [
 	running one: an entry that says claimed and is not in here had its worker taken away"
 
 	^ mutex critical: [ inFlight includes: aKey ]
+]
+
+{ #category : #accessing }
+SoilQueue >> lane: aSymbol [
+	"the live lane of that name, for whoever sets its values in code"
+
+	^ lanes
+		detect: [ :each | each name = aSymbol ]
+		ifNone: [ self error: 'no lane named ', aSymbol printString ]
+]
+
+{ #category : #accessing }
+SoilQueue >> laneFor: aKey in: aQueueWorkspace [
+	"the live lane an entry belongs to, found from its key"
+
+	^ self lane: (aQueueWorkspace laneFor: aKey) name
+]
+
+{ #category : #accessing }
+SoilQueue >> lanes [
+
+	^ lanes
 ]
 
 { #category : #accessing }
@@ -243,15 +328,6 @@ SoilQueue >> nextDueTime [
 
 	^ self withTransactionDo: [ :txn |
 		(self workspaceIn: txn) nextDueTimeAt: self now ]
-]
-
-{ #category : #rate }
-SoilQueue >> noteIssueAt: aDateAndTime under: aDescription [
-	"an entry went out, and counts against the rate for its period. Nothing to count
-	without a rate"
-
-	aDescription rateLimit ifNil: [ ^ self ].
-	mutex critical: [ rateCounter noteIssueAt: aDateAndTime ]
 ]
 
 { #category : #waking }
@@ -281,46 +357,23 @@ SoilQueue >> now [
 
 { #category : #running }
 SoilQueue >> prepareIn: aTransaction [
-	"the push at opening. Work that was left lying around has to be found without anyone
-	signalling for it: the signal that would have said so came before the restart and is
-	gone with it.
+	"read my configuration, then give the push at opening. A start is 'read the
+	configuration, then run', for a restart as much as for the first one, so this is where
+	my lanes are built again from the workspace and the description.
 
-	This only raises the flag; the first work unit does the rest. An entry that is not due
-	yet raises it too: the step that finds nothing due is the one that reads when it will
-	be, and the dispatcher sleeps until then."
+	Work that was left lying around has to be found without anyone signalling for it: the
+	signal that would have said so came before the restart and is gone with it. This only
+	raises the flag; the first work unit does the rest. An entry that is not due yet raises
+	it too: the step that finds nothing due is the one that reads when it will be, and the
+	dispatcher sleeps until then.
 
+	A queue created on its workspace without a resident has no description to read; its
+	values were set in code, and they stay."
+
+	self descriptionId ifNotNil: [
+		self configureFrom: (self descriptionIn: aTransaction) in: aTransaction ].
 	((self workspaceIn: aTransaction) nextDueTimeAt: self now)
 		ifNotNil: [ self noteWork ]
-]
-
-{ #category : #rate }
-SoilQueue >> rateAllowanceAt: aDateAndTime under: aDescription [
-	"how many entries the rate lets out at aDateAndTime. Without a rate there is no bound of
-	its own, and the worker limit is answered -- the one that decides then anyway"
-
-	^ aDescription rateLimit
-		ifNil: [ aDescription workerLimit ]
-		ifNotNil: [ :limit |
-			mutex critical: [
-				rateCounter
-					allowanceAt: aDateAndTime
-					limit: limit
-					period: aDescription ratePeriod ] ]
-]
-
-{ #category : #rate }
-SoilQueue >> rateFreeAt: aDateAndTime under: aDescription [
-	"from when the rate lets the next entry out: aDateAndTime itself when it has room, and
-	always without a rate"
-
-	^ aDescription rateLimit
-		ifNil: [ aDateAndTime ]
-		ifNotNil: [ :limit |
-			mutex critical: [
-				rateCounter
-					freeAt: aDateAndTime
-					limit: limit
-					period: aDescription ratePeriod ] ]
 ]
 
 { #category : #recovery }
@@ -333,10 +386,9 @@ SoilQueue >> recover: aKey [
 	dead-lettering of its own.
 
 	This is the one moment the queue learns that a worker went away, so it is where that is
-	counted. An entry that has lost its worker as often as the description allows is not
-	given back but parked: whatever took the worker with it would take the next one too.
-	Compensated first all the same, so that what it left behind is not left lying under a
-	dead letter."
+	counted. An entry that has lost its worker as often as its lane allows is not given back
+	but parked: whatever took the worker with it would take the next one too. Compensated
+	first all the same, so that what it left behind is not left lying under a dead letter."
 
 	self withTransactionDo: [ :txn |
 		| workspace entry |
@@ -344,7 +396,7 @@ SoilQueue >> recover: aKey [
 		entry := workspace entryAt: aKey.
 		entry isClaimed ifFalse: [ ^ self ].
 		entry resumption == #compensating ifTrue: [ entry compensateIn: txn ].
-		((self descriptionIn: txn) allowsOrphanedRetryOf: entry)
+		((self laneFor: aKey in: workspace) allowsOrphanedRetryOf: entry)
 			ifTrue: [
 				entry noteOrphaned.
 				entry releaseClaim ]
@@ -386,21 +438,29 @@ SoilQueue >> release: aKey [
 
 { #category : #waking }
 SoilQueue >> rememberNextDueTime [
-	"the last thing a step does: read when the first entry of the ordering falls due. Only
-	a time still to come is a wake time. One that has come is the workers' business -- they
-	are running for it, and the last of them to run dry hands on what it found.
+	"the last thing a step does: read when the first entry of each lane falls due, and keep
+	the earliest. Only a time still to come is a wake time. One that has come is the
+	workers' business -- they are running for it, and the last of them to run dry hands on
+	what it found.
 
-	With a rate that is used up, 'due now' is not a time to wake at: nothing may go before
-	the rate has room again, and no worker is running to say so. So the wake time is the
-	later of the two"
+	With a lane's rate used up, 'due now' is not a time to wake at: nothing of that lane may
+	go before the rate has room again, and no worker is running to say so. So the wake time
+	of a lane is the later of the two"
 
 	| time |
 	time := self withTransactionDo: [ :txn |
-		| description now |
-		description := self descriptionIn: txn.
+		| workspace now |
+		workspace := self workspaceIn: txn.
 		now := self now.
-		((self workspaceIn: txn) nextDueTimeAt: now) ifNotNil: [ :due |
-			due max: (self rateFreeAt: now under: description) ] ].
+		lanes
+			inject: nil
+			into: [ :earliest :lane |
+				(workspace nextDueTimeAt: now in: (workspace laneNamed: lane name))
+					ifNil: [ earliest ]
+					ifNotNil: [ :due |
+						| wake |
+						wake := due max: (mutex critical: [ lane rateFreeAt: now ]).
+						earliest ifNil: [ wake ] ifNotNil: [ earliest min: wake ] ] ] ].
 	(time notNil and: [ time > self now ]) ifFalse: [ ^ self ].
 	mutex critical: [
 		wakeAt := wakeAt
@@ -430,35 +490,44 @@ SoilQueue >> runStrategyClass [
 ]
 
 { #category : #running }
-SoilQueue >> startWorker [
+SoilQueue >> startWorkerFor: aLane [
 
 	| worker |
-	worker := SoilQueueWorker on: self.
+	worker := SoilQueueWorker on: self lane: aLane.
 	self workerStarting: worker.
 	worker start
 ]
 
 { #category : #running }
 SoilQueue >> startWorkersForWhatIsDue [
-	"as many workers as there is due work for, up to the limit, and nothing on stock.
+	"as many workers as there is due work for, lane by lane, up to the limit, and nothing on
+	stock.
 
 	The count stops at the limit and at the first entry that is not due, so the scan costs
 	the same whether ten entries are waiting or ten thousand. The number of waiting entries
 	says nothing about how many workers are needed anyway -- it only says how long the
-	working takes. Nor for more than the rate lets out right now: a worker started for an
-	entry that may not go yet would only end again at once."
+	working takes. Nor for more than a lane's rate lets out right now: a worker started for
+	an entry that may not go yet would only end again at once.
 
-	| wanted running |
+	The limit is one for all my workers together. A lane that already has workers running
+	gets that many fewer new ones."
+
+	| free |
 	self shouldStop ifTrue: [ ^ self ].
-	wanted := self withTransactionDo: [ :txn |
-		| description now |
-		description := self descriptionIn: txn.
-		now := self now.
-		(((self workspaceIn: txn) dueCountAt: now upTo: description workerLimit)
-			min: description workerLimit)
-			min: (self rateAllowanceAt: now under: description) ].
-	running := mutex critical: [ workers size ].
-	(wanted - running) timesRepeat: [ self startWorker ]
+	free := workerLimit - (mutex critical: [ workers size ]).
+	lanes do: [ :lane |
+		free > 0 ifTrue: [
+			| wanted running |
+			wanted := self withTransactionDo: [ :txn |
+				| workspace now |
+				workspace := self workspaceIn: txn.
+				now := self now.
+				(workspace dueCountAt: now in: (workspace laneNamed: lane name) upTo: workerLimit)
+					min: (mutex critical: [ lane rateAllowanceAt: now ifNone: [ workerLimit ] ]) ].
+			running := mutex critical: [ workers count: [ :each | each lane == lane ] ].
+			((wanted - running) min: free) timesRepeat: [
+				self startWorkerFor: lane.
+				free := free - 1 ] ] ]
 ]
 
 { #category : #stopping }
@@ -524,6 +593,43 @@ SoilQueue >> work: aKey [
 	failure ifNotNil: [ self book: failure for: aKey ]
 ]
 
+{ #category : #running }
+SoilQueue >> workerFinished: aWorker [
+	"a worker ends by itself when nothing comes any more, which is also how a stop reaches
+	it: the queue stops handing out and the workers run dry"
+
+	mutex critical: [ workers remove: aWorker ifAbsent: [ nil ] ]
+]
+
+{ #category : #accessing }
+SoilQueue >> workerLimit [
+	"how many of my workers may run at once, over all my lanes"
+
+	^ workerLimit
+]
+
+{ #category : #accessing }
+SoilQueue >> workerLimit: anInteger [
+
+	anInteger < 1 ifTrue: [ ^ self error: 'a queue with no worker would never run' ].
+	workerLimit := anInteger
+]
+
+{ #category : #accessing }
+SoilQueue >> workers [
+	"the workers that are running right now"
+
+	^ mutex critical: [ workers asArray ]
+]
+
+{ #category : #running }
+SoilQueue >> workerStarting: aWorker [
+	"counted from the moment it exists, not from its first entry: the dispatcher asks how
+	many are running before it decides to start another"
+
+	mutex critical: [ workers add: aWorker ]
+]
+
 { #category : #working }
 SoilQueue >> workOnce: aKey [
 	"one attempt at the work unit, and what follows from what it answers, in one commit.
@@ -571,27 +677,4 @@ SoilQueue >> workOnce: aKey [
 				entry markDone ].
 		txn commit ].
 	^ nil
-]
-
-{ #category : #running }
-SoilQueue >> workerFinished: aWorker [
-	"a worker ends by itself when nothing comes any more, which is also how a stop reaches
-	it: the queue stops handing out and the workers run dry"
-
-	mutex critical: [ workers remove: aWorker ifAbsent: [ nil ] ]
-]
-
-{ #category : #running }
-SoilQueue >> workerStarting: aWorker [
-	"counted from the moment it exists, not from its first entry: the dispatcher asks how
-	many are running before it decides to start another"
-
-	mutex critical: [ workers add: aWorker ]
-]
-
-{ #category : #accessing }
-SoilQueue >> workers [
-	"the workers that are running right now"
-
-	^ mutex critical: [ workers asArray ]
 ]

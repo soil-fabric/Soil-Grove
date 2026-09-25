@@ -6,8 +6,9 @@ SoilQueueWorkspace, and runs the same with or without me around it.
 I hold that workspace and the configuration -- how many workers, the rate, the retry
 budgets and the backoff. None of that shapes a key; what does, the index and the format,
 belongs to the workspace, because whoever opens it without me still has to find the
-entries. I am read to create and configure the queue, ideally only that, at every start;
-the queue reaches its workspace by id.
+entries. I am read to create and configure the queue at every start, and only then: my
+values go to its lanes, which hold them until the next start. The queue reaches its
+workspace by id.
 
 The workspace is a cluster root of its own. I make it one in #initializeFrom:, which is
 where a description creates the objects its resident works on, and it makes the index
@@ -51,23 +52,6 @@ SoilQueueDescription class >> named: aSymbol workspace: aQueueWorkspace [
 	^ self new
 		setName: aSymbol
 		workspace: aQueueWorkspace
-]
-
-{ #category : #retrying }
-SoilQueueDescription >> allowsFailureRetryOf: anEntry [
-	"whether an entry whose work unit failed retriably may be tried once more. With a limit
-	of three, three retries happen and the fourth failure is the one that gives up"
-
-	^ anEntry failureRetries < self failureRetryLimit
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> allowsOrphanedRetryOf: anEntry [
-	"whether an entry that lost its worker may be given back once more. Counted like the
-	restarts of a resident: with a limit of two, two orphaned entries come back and the
-	third orphaning is the one that parks it"
-
-	^ orphanedRetryLimit isNil or: [ anEntry orphanedRetries < orphanedRetryLimit ]
 ]
 
 { #category : #retrying }
@@ -142,10 +126,12 @@ SoilQueueDescription >> name [
 { #category : #'instance creation' }
 SoilQueueDescription >> newInstanceIn: aTransaction [
 	"the name goes along, so the live queue can answer for itself what it is called
-	without opening a transaction for a label"
+	without opening a transaction for a label. So does the configuration: the queue builds
+	its lanes from my workspace and my values right here, and again at every start"
 
 	^ (super newInstanceIn: aTransaction)
 		name: name;
+		configureFrom: self in: aTransaction;
 		yourself
 ]
 
@@ -203,14 +189,6 @@ SoilQueueDescription >> ratePeriod [
 	"the length of the period #rateLimit counts in"
 
 	^ ratePeriod
-]
-
-{ #category : #retrying }
-SoilQueueDescription >> retryDelayAfter: anInteger [
-	"the pause before retry number anInteger: the base, doubled for every failure before
-	it, never longer than the cap"
-
-	^ (self backoffBase * (2 raisedTo: anInteger - 1)) min: self backoffCap
 ]
 
 { #category : #initialization }
