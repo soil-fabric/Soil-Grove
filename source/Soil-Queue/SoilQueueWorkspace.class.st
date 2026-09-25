@@ -14,6 +14,10 @@ The lanes share the index. Each has a section of it, told apart by a marker in f
 every key, and a format that orders its keys; both are stored here, as
 SoilQueueLaneDescriptions, because they shape every key -- whoever opens me without a
 description still has to find the entries. How fast a lane runs is not mine.
+
+How wide the marker is, is decided when I am created, and with it how many lanes I can
+hold: none wide means one lane over the whole index, one byte means up to 256. A lane
+comes in by #addLaneNamed:format:, and I hand out its marker -- the lowest free one.
 "
 Class {
 	#name : #SoilQueueWorkspace,
@@ -39,7 +43,19 @@ SoilQueueWorkspace class >> index: aSoilIndexedDictionary keySize: keySizeInByte
 { #category : #'instance creation' }
 SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes [
 	"the ordinary case: an index of my own with one lane, #default, ordered by due time,
-	with no marker and no byte paid for one.
+	with no marker and no byte paid for one -- and no room for a second lane"
+
+	^ self
+		timeOrderedWithBackend: anIndexClass
+		keySize: keySizeInBytes
+		markerWidth: 0
+]
+
+{ #category : #'instance creation' }
+SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes markerWidth: widthInBytes [
+	"an index of my own with one lane, #default, ordered by due time, behind a marker of
+	widthInBytes -- room for more lanes to be added, one per marker. Whether that room is
+	needed is decided here: the width shapes every key and cannot change later.
 
 	The skip list level is set because Soil leaves it nil, and a nil one fails on the first
 	write with a message that says nothing about what is missing. 16 is what the one
@@ -53,7 +69,7 @@ SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySiz
 		keySize: keySizeInBytes
 		lanes: { SoilQueueLaneDescription
 			named: #default
-			range: (SoilPrefixRange prefix: 0 width: 0 keySize: keySizeInBytes)
+			range: (SoilPrefixRange prefix: 0 width: widthInBytes keySize: keySizeInBytes)
 			format: SoilQueueTimeOrderedKeyFormat new }
 ]
 
@@ -78,6 +94,31 @@ SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 	key := aLaneDescription keyFor: anEntry.
 	index at: key put: anEntry.
 	^ key asIndexKeyOfSize: keySize
+]
+
+{ #category : #lanes }
+SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
+	"a lane behind the lowest marker no lane has, and answer it. The caller never picks a
+	marker, so two lanes cannot collide on one, and a lane keeps its marker for as long as
+	it is there -- it is written into every key of it.
+
+	Stored with me, in the transaction I was read in; I do not commit"
+
+	| width taken prefix lane |
+	(lanes anySatisfy: [ :each | each name = aSymbol ]) ifTrue: [
+		^ self error: 'there is a lane named ' , aSymbol printString , ' already' ].
+	width := self markerWidth.
+	taken := (lanes collect: [ :each | each range prefix ]) asSet.
+	prefix := (0 to: (256 raisedTo: width) - 1)
+		detect: [ :each | (taken includes: each) not ]
+		ifNone: [ ^ self error: 'no marker left for another lane, with markers '
+			, width printString , ' bytes wide' ].
+	lane := SoilQueueLaneDescription
+		named: aSymbol
+		range: (SoilPrefixRange prefix: prefix width: width keySize: keySize)
+		format: aFormat.
+	lanes add: lane.
+	^ lane
 ]
 
 { #category : #accessing }
@@ -236,6 +277,14 @@ SoilQueueWorkspace >> laneNamed: aSymbol [
 SoilQueueWorkspace >> lanes [
 
 	^ lanes asArray
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> markerWidth [
+	"how many bytes in front of every key tell the lanes apart -- the same for all of them,
+	so any lane answers it. Zero leaves room for one lane only"
+
+	^ self defaultLane range width
 ]
 
 { #category : #moving }
