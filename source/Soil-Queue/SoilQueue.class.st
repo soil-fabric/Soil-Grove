@@ -59,7 +59,7 @@ SoilQueue >> add: anEntry in: aTransaction [
 	"put an entry in, in the caller's transaction. Not coordinated -- two writers do not
 	get in each other's way here, because each entry gets a key of its own"
 
-	^ (self descriptionIn: aTransaction) add: anEntry
+	^ (self workspaceIn: aTransaction) add: anEntry
 ]
 
 { #category : #working }
@@ -100,7 +100,7 @@ SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
 	key := mutex critical: [
 		| description found |
 		description := self descriptionIn: aTransaction.
-		found := description
+		found := (self workspaceIn: aTransaction)
 			nextDueAt: aDateAndTime
 			skipping: inFlight
 			ifNone: [ :time | nextTime := time. nil ].
@@ -144,9 +144,10 @@ SoilQueue >> book: anError for: aKey [
 
 	lastStepError := anError.
 	self withTransactionDo: [ :txn |
-		| description entry |
+		| description workspace entry |
 		description := self descriptionIn: txn.
-		entry := description entryAt: aKey.
+		workspace := self workspaceIn: txn.
+		entry := workspace entryAt: aKey.
 		((entry classifyError: anError) == #retriable
 			and: [ description allowsFailureRetryOf: entry ])
 			ifTrue: [
@@ -154,10 +155,10 @@ SoilQueue >> book: anError for: aKey [
 				entry eligibleAt: self now
 					+ (entry retryDelayAfter: entry failureRetries under: description).
 				entry releaseClaim.
-				description moveKey: aKey for: entry ]
+				workspace moveKey: aKey for: entry ]
 			ifFalse: [
 				entry giveUp: anError in: txn.
-				description removeKey: aKey.
+				workspace removeKey: aKey.
 				entry markDone ].
 		txn commit ]
 ]
@@ -170,7 +171,7 @@ SoilQueue >> claim: aKey [
 	written here is invisible to a transaction that is already open elsewhere."
 
 	self withTransactionDo: [ :txn |
-		((self descriptionIn: txn) entryAt: aKey) claimAt: self now.
+		((self workspaceIn: txn) entryAt: aKey) claimAt: self now.
 		txn commit ]
 ]
 
@@ -241,7 +242,7 @@ SoilQueue >> nextDueTime [
 	external wakeup, and for its decision whether the database is quiet enough to close."
 
 	^ self withTransactionDo: [ :txn |
-		(self descriptionIn: txn) nextDueTimeAt: self now ]
+		(self workspaceIn: txn) nextDueTimeAt: self now ]
 ]
 
 { #category : #rate }
@@ -288,7 +289,7 @@ SoilQueue >> prepareIn: aTransaction [
 	yet raises it too: the step that finds nothing due is the one that reads when it will
 	be, and the dispatcher sleeps until then."
 
-	((self descriptionIn: aTransaction) nextDueTimeAt: self now)
+	((self workspaceIn: aTransaction) nextDueTimeAt: self now)
 		ifNotNil: [ self noteWork ]
 ]
 
@@ -338,16 +339,16 @@ SoilQueue >> recover: aKey [
 	dead letter."
 
 	self withTransactionDo: [ :txn |
-		| description entry |
-		description := self descriptionIn: txn.
-		entry := description entryAt: aKey.
+		| workspace entry |
+		workspace := self workspaceIn: txn.
+		entry := workspace entryAt: aKey.
 		entry isClaimed ifFalse: [ ^ self ].
 		entry resumption == #compensating ifTrue: [ entry compensateIn: txn ].
-		(description allowsOrphanedRetryOf: entry)
+		((self descriptionIn: txn) allowsOrphanedRetryOf: entry)
 			ifTrue: [
 				entry noteOrphaned.
 				entry releaseClaim ]
-			ifFalse: [ description deadLetter: aKey ].
+			ifFalse: [ workspace deadLetter: aKey ].
 		txn commit ]
 ]
 
@@ -370,7 +371,7 @@ SoilQueue >> recoverOrphanedClaims [
 	recovered := true.
 	orphans := OrderedCollection new.
 	self withTransactionDo: [ :txn |
-		(self descriptionIn: txn) keysAndEntriesDo: [ :key :entry |
+		(self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
 			(entry isClaimed and: [ (self isHolding: key) not ])
 				ifTrue: [ orphans add: key ] ] ].
 	orphans do: [ :each | self recover: each ]
@@ -398,7 +399,7 @@ SoilQueue >> rememberNextDueTime [
 		| description now |
 		description := self descriptionIn: txn.
 		now := self now.
-		(description nextDueTimeAt: now) ifNotNil: [ :due |
+		((self workspaceIn: txn) nextDueTimeAt: now) ifNotNil: [ :due |
 			due max: (self rateFreeAt: now under: description) ] ].
 	(time notNil and: [ time > self now ]) ifFalse: [ ^ self ].
 	mutex critical: [
@@ -453,7 +454,7 @@ SoilQueue >> startWorkersForWhatIsDue [
 		| description now |
 		description := self descriptionIn: txn.
 		now := self now.
-		((description dueCountAt: now upTo: description workerLimit)
+		(((self workspaceIn: txn) dueCountAt: now upTo: description workerLimit)
 			min: description workerLimit)
 			min: (self rateAllowanceAt: now under: description) ].
 	running := mutex critical: [ workers size ].
@@ -548,12 +549,12 @@ SoilQueue >> workOnce: aKey [
 	an entry knows about, and #work: runs the unit again for it. Otherwise I answer nil."
 
 	self withTransactionDo: [ :txn |
-		| description entry outcome |
-		description := self descriptionIn: txn.
-		entry := description entryAt: aKey.
+		| workspace entry outcome |
+		workspace := self workspaceIn: txn.
+		entry := workspace entryAt: aKey.
 		(entry isReadyToRunIn: txn)
 			ifFalse: [
-				description deadLetter: aKey.
+				workspace deadLetter: aKey.
 				txn commit.
 				^ self ].
 		outcome := [ entry performIn: txn ]
@@ -564,9 +565,9 @@ SoilQueue >> workOnce: aKey [
 		outcome == #more
 			ifTrue: [
 				entry releaseClaim.
-				description moveKey: aKey for: entry ]
+				workspace moveKey: aKey for: entry ]
 			ifFalse: [
-				description removeKey: aKey.
+				workspace removeKey: aKey.
 				entry markDone ].
 		txn commit ].
 	^ nil

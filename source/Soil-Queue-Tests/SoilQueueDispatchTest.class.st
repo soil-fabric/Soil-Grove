@@ -60,7 +60,7 @@ SoilQueueDispatchTest >> path [
 SoilQueueDispatchTest >> put: aBlock [
 
 	^ self inTransaction: [ :txn |
-		(self descriptionIn: txn) add: (aBlock value: (txn root at: #target)) ]
+		(self workspaceIn: txn) add: (aBlock value: (txn root at: #target)) ]
 ]
 
 { #category : #helpers }
@@ -100,7 +100,7 @@ SoilQueueDispatchTest >> stateOf: aKey [
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ ((self descriptionIn: txn) entryAt: aKey ifAbsent: [ nil ])
+	^ [ ((self workspaceIn: txn) entryAt: aKey ifAbsent: [ nil ])
 		ifNotNil: [ :entry | entry state ] ]
 		ensure: [ txn abort ]
 ]
@@ -259,4 +259,11 @@ SoilQueueDispatchTest >> workerLimit: anInteger [
 
 	self inTransaction: [ :txn |
 		(self descriptionIn: txn) workerLimit: anInteger ]
+]
+
+{ #category : #helpers }
+SoilQueueDispatchTest >> workspaceIn: aTransaction [
+	"where the entries are: the workspace the description holds"
+
+	^ (self descriptionIn: aTransaction) workspace
 ]

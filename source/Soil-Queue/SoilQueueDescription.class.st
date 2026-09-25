@@ -1,18 +1,17 @@
 "
-The persisted half of a queue: where its entries live, how they are ordered, and
-everything else that has to outlive the image.
+What makes a queue a resident: I create it when the database opens, configure it, and
+let the resident machinery start it. The queue itself works on its workspace, a
+SoilQueueWorkspace, and runs the same with or without me around it.
 
-I am not the queue. The queue coordinates between workers and therefore has to be one
-object in memory, which a database object cannot be -- two transactions materialize two
-of me. So the durable part is mine and the live part is the queue's, the same cut the
-resident system makes everywhere.
+I hold that workspace and the configuration -- how many workers, the rate, the retry
+budgets and the backoff. None of that shapes a key; what does, the index and the format,
+belongs to the workspace, because whoever opens it without me still has to find the
+entries. I am read to create and configure the queue, ideally only that, at every start;
+the queue reaches its workspace by id.
 
-What I hold: the strategy, which decides which index the entries lie on and which
-section of it, and the format, which decides how they are ordered. Both are read
-whenever I am read and nowhere else, so neither is a cluster root of its own.
-
-The index is. I make it one in #initializeFrom:, which is where a description creates
-the objects its resident works on. That also spares the queue a trap: Soil sends
+The workspace is a cluster root of its own. I make it one in #initializeFrom:, which is
+where a description creates the objects its resident works on, and it makes the index
+and the dead letters roots in turn. That also spares the queue a trap: Soil sends
 #soilClusterRootIn: only out of #makeRoot:, never to an object it promotes on its own
 because the class says #isSoilClusterRoot -- so an index that only ever arrived by
 reference would be stored with no transaction at all.
@@ -26,9 +25,6 @@ Class {
 	#superclass : #SoilResidentDescription,
 	#instVars : [
 		'name',
-		'strategy',
-		'format',
-		'deadLetters',
 		'workerLimit',
 		'orphanedRetryLimit',
 		'failureRetryLimit',
@@ -41,37 +37,20 @@ Class {
 }
 
 { #category : #'instance creation' }
-SoilQueueDescription class >> named: aSymbol strategy: aStrategy format: aFormat [
-
-	^ self new
-		setName: aSymbol
-		strategy: aStrategy
-		format: aFormat
-]
-
-{ #category : #'instance creation' }
 SoilQueueDescription class >> named: aSymbol timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes [
 	"the ordinary queue: an index of its own, ordered by due time"
 
 	^ self
 		named: aSymbol
-		strategy: (SoilQueueStrategy ownIndexWithBackend: anIndexClass keySize: keySizeInBytes)
-		format: SoilQueueTimeOrderedKeyFormat new
+		workspace: (SoilQueueWorkspace timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes)
 ]
 
-{ #category : #adding }
-SoilQueueDescription >> add: anEntry [
-	"put an entry in, in the transaction I was read in -- I do not commit. The
-	notification that wakes a worker belongs after that commit, not here: before it there
-	is nothing to find.
+{ #category : #'instance creation' }
+SoilQueueDescription class >> named: aSymbol workspace: aQueueWorkspace [
 
-	Answers the key in the form the index compares in, which is the form everything else
-	hands around too. #keyFor: answers the other form, the bytes it is composed of."
-
-	| key |
-	key := self keyFor: anEntry.
-	strategy index at: key put: anEntry.
-	^ key asIndexKeyOfSize: strategy range keySize
+	^ self new
+		setName: aSymbol
+		workspace: aQueueWorkspace
 ]
 
 { #category : #retrying }
@@ -89,12 +68,6 @@ SoilQueueDescription >> allowsOrphanedRetryOf: anEntry [
 	third orphaning is the one that parks it"
 
 	^ orphanedRetryLimit isNil or: [ anEntry orphanedRetries < orphanedRetryLimit ]
-]
-
-{ #category : #converting }
-SoilQueueDescription >> appendKeyPartsFor: anEntry on: aWriteStream [
-	"the embedder's link in the chain, and the place a section inside one queue is marked.
-	Nothing by default -- whoever has nothing to contribute contributes nothing"
 ]
 
 { #category : #retrying }
@@ -126,63 +99,6 @@ SoilQueueDescription >> backoffCap: aDuration [
 	backoffCap := aDuration
 ]
 
-{ #category : #accessing }
-SoilQueueDescription >> deadLetter: aKey [
-	"park an entry that could not be worked on at all, and take it out of the ordering.
-
-	Put first and removed second, so that an abort in between leaves it where it was rather
-	than nowhere. It keeps its key: it is the same entry, only somewhere else."
-
-	| entry |
-	entry := self entryAt: aKey.
-	entry markDeadLetter.
-	deadLetters at: aKey put: entry.
-	self removeKey: aKey.
-	^ entry
-]
-
-{ #category : #enumerating }
-SoilQueueDescription >> deadLettersDo: aBlock [
-	"the parked entries with their keys. Nobody is woken for these -- they are here to be
-	looked at"
-
-	deadLetters newIterator associationsDo: [ :each |
-		aBlock value: each key value: each value ]
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> dueCountAt: aDateAndTime upTo: aLimit [
-	"how many entries are due, counted no further than aLimit.
-
-	The number is only ever used to decide how many workers to have, so counting past the
-	limit would buy nothing. The walk stops at the first entry that is not due either,
-	because the ordering is by due time and nothing behind it can be due.
-
-	Only pending entries count. One that says claimed is with a worker already, or waiting
-	for the recovery pass, and in neither case does it call for another worker."
-
-	| count |
-	count := 0.
-	self keysAndEntriesDo: [ :key :entry |
-		entry eligibleAt > aDateAndTime ifTrue: [ ^ count ].
-		entry isPending ifTrue: [
-			count := count + 1.
-			count >= aLimit ifTrue: [ ^ count ] ] ].
-	^ count
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> entryAt: aKey [
-
-	^ strategy index at: aKey
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> entryAt: aKey ifAbsent: aBlock [
-
-	^ strategy index at: aKey ifAbsent: aBlock
-]
-
 { #category : #retrying }
 SoilQueueDescription >> failureRetryLimit [
 	"how often a work unit that failed retriably is tried again before the entry gives up.
@@ -201,85 +117,20 @@ SoilQueueDescription >> failureRetryLimit: anInteger [
 	failureRetryLimit := anInteger
 ]
 
-{ #category : #accessing }
-SoilQueueDescription >> format [
-
-	^ format
-]
-
 { #category : #initialization }
 SoilQueueDescription >> initializeFrom: aTransaction [
-	"the index is a cluster root of its own. Two things follow, and both are wanted: it is
-	not copied into my cluster, and two queues that share one index share one object
-	instead of each getting a copy that overwrites the other's.
+	"my workspace is a cluster root of its own -- that is what gives it the id the queue
+	reaches it by, without reading me. Made a root first, then asked to make its own
+	roots, the index and the dead letters"
 
-	The dead letters get a second index, never shared. Out of the ordering, so that a
-	parked entry is not stepped over on every scan for work, and still in the store, so
-	that it can be found and looked at -- work that disappears without a trace is worse
-	than work that sits there unfinished."
-
-	strategy makeIndexRootIn: aTransaction.
-	deadLetters := (SoilIndexedDictionary newWithBackend: strategy backend)
-		keySize: strategy range keySize;
-		maxLevel: 16;
-		yourself.
-	aTransaction makeRoot: deadLetters
+	aTransaction makeRoot: workspace.
+	workspace initializeIn: aTransaction
 ]
 
 { #category : #'instance creation' }
 SoilQueueDescription >> instanceClass [
 
 	^ SoilQueue
-]
-
-{ #category : #converting }
-SoilQueueDescription >> keyFor: anEntry [
-	"the chain: the format orders, an embedder may add its own part, and the strategy
-	places the result inside its section -- marker first, padding last, filling the whole
-	key size.
-
-	No single participant knows the whole key. The entry supplies values and never a key,
-	so that two entries of one queue cannot sort by different rules."
-
-	^ strategy keyWith: (ByteArray streamContents: [ :parts |
-		format appendKeyPartsFor: anEntry on: parts.
-		self appendKeyPartsFor: anEntry on: parts ])
-]
-
-{ #category : #enumerating }
-SoilQueueDescription >> keysAndEntriesDo: aBlock [
-	"every entry of my section with its key, in key order.
-
-	The only reader of this is the recovery pass, and it reads every entry because that is
-	where the answer is: an orphaned claim cannot be found over the index, since a claim
-	does not change the key. Selecting work does not come this way -- it reads one entry
-	and stops."
-
-	| iterator scanKey found |
-	iterator := strategy newIterator.
-	scanKey := strategy range firstIndexKey.
-	[ found := iterator nextKeyCloseTo: scanKey.
-	  found notNil and: [ strategy range includesKey: found ] ] whileTrue: [
-		aBlock value: found value: (iterator at: found).
-		scanKey := found + 1 ]
-]
-
-{ #category : #moving }
-SoilQueueDescription >> moveKey: aKey for: anEntry [
-	"put anEntry under the key it asks for now, and answer that key. Its due time may have
-	changed since it came in -- that is how a follow-up later and a backoff are expressed --
-	and the key is what sorts by it. Unchanged, nothing is written.
-
-	One move rather than a removal and an insertion, because the removal answers an
-	unloaded proxy and an insertion would resolve it: the target would be read from disk
-	only to change the number it is filed under. Asked of the index and not of an iterator
-	on it -- the index is the one that writes the journal and marks itself for the commit."
-
-	| newKey |
-	newKey := (self keyFor: anEntry) asIndexKeyOfSize: strategy range keySize.
-	newKey = aKey ifTrue: [ ^ aKey ].
-	strategy index moveKey: aKey to: newKey.
-	^ newKey
 ]
 
 { #category : #accessing }
@@ -296,60 +147,6 @@ SoilQueueDescription >> newInstanceIn: aTransaction [
 	^ (super newInstanceIn: aTransaction)
 		name: name;
 		yourself
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> nextDueAt: aDateAndTime skipping: aCollection ifNone: aBlock [
-	"the key of the oldest entry that is due, skipping the keys that are already out.
-
-	When nothing is due, aBlock is evaluated with the time the next entry becomes due, or
-	with nil when there is nothing at all -- so a caller can sleep exactly as long as it
-	has to rather than come back and ask again.
-
-	The scan jumps rather than steps: to the start of my section, then past each key it
-	looked at. What ends it is the range, which says where the section stops, because the
-	index has no idea that it is shared. Past the last key of the index the positioning
-	call answers nil, so that end takes care of itself.
-
-	Only pending entries are handed out. An entry that says claimed belongs to a worker, or
-	to the recovery pass if no worker holds it -- and it stays in the ordering either way,
-	because a claim does not change a key. Without this a work unit that throws would be
-	handed straight back to the next worker, for ever."
-
-	| iterator range scanKey found |
-	range := strategy range.
-	iterator := strategy newIterator.
-	scanKey := range firstIndexKey.
-	[ found := iterator nextKeyCloseTo: scanKey.
-	  found notNil and: [ range includesKey: found ] ]
-		whileTrue: [
-			(aCollection includes: found)
-				ifTrue: [ scanKey := found + 1 ]
-				ifFalse: [
-					| entry |
-					entry := iterator at: found.
-					entry isPending
-						ifFalse: [ scanKey := found + 1 ]
-						ifTrue: [
-							entry eligibleAt <= aDateAndTime ifTrue: [ ^ found ].
-							^ aBlock cull: entry eligibleAt ] ] ].
-	^ aBlock cull: nil
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> nextDueTimeAt: aDateAndTime [
-	"when the first entry of my section may run: aDateAndTime itself when one is already
-	due, the time of the earliest one when none is, and nil when the section holds nothing.
-
-	One of the two questions an embedder asks a queue. It answers a time rather than a key
-	because the asker is not going to work on it -- it wants to know how long it may sleep,
-	or whether the database is quiet enough to close."
-
-	self
-		nextDueAt: aDateAndTime
-		skipping: #(  )
-		ifNone: [ :time | ^ time ].
-	^ aDateAndTime
 ]
 
 { #category : #accessing }
@@ -375,7 +172,7 @@ SoilQueueDescription >> orphanedRetryLimit: anInteger [
 SoilQueueDescription >> printOn: aStream [
 
 	super printOn: aStream.
-	aStream << ' ' << name << ' in ' << strategy range printString
+	aStream << ' ' << name
 ]
 
 { #category : #rate }
@@ -384,9 +181,8 @@ SoilQueueDescription >> rateLimit [
 	all -- the default, and how a queue ran before it had one. A number here is what a far
 	side accepts per so long; it is the embedder's to know.
 
-	One rate for the whole queue. Work that needs a pace of its own gets a queue of its own,
-	on the same index if need be: queues that differ only in their rate are what segmenting
-	a queue is for"
+	One rate for the whole queue, until a queue has lanes: then work that needs a pace of
+	its own gets a lane of its own"
 
 	^ rateLimit
 ]
@@ -409,14 +205,6 @@ SoilQueueDescription >> ratePeriod [
 	^ ratePeriod
 ]
 
-{ #category : #removing }
-SoilQueueDescription >> removeKey: aKey [
-	"take an entry out of the ordering. What the entry itself then says about why -- done,
-	failed at its work, dead lettered -- is written in the same transaction"
-
-	^ strategy index removeKey: aKey
-]
-
 { #category : #retrying }
 SoilQueueDescription >> retryDelayAfter: anInteger [
 	"the pause before retry number anInteger: the base, doubled for every failure before
@@ -426,17 +214,10 @@ SoilQueueDescription >> retryDelayAfter: anInteger [
 ]
 
 { #category : #initialization }
-SoilQueueDescription >> setName: aSymbol strategy: aStrategy format: aFormat [
+SoilQueueDescription >> setName: aSymbol workspace: aQueueWorkspace [
 
 	name := aSymbol.
-	strategy := aStrategy.
-	format := aFormat
-]
-
-{ #category : #accessing }
-SoilQueueDescription >> strategy [
-
-	^ strategy
+	workspace := aQueueWorkspace
 ]
 
 { #category : #accessing }

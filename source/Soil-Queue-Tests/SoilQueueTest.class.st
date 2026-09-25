@@ -33,7 +33,7 @@ SoilQueueTest >> entryAt: aKey [
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ (self descriptionIn: txn) entryAt: aKey ifAbsent: [ nil ] ]
+	^ [ (self workspaceIn: txn) entryAt: aKey ifAbsent: [ nil ] ]
 		ensure: [ txn abort ]
 ]
 
@@ -57,7 +57,7 @@ SoilQueueTest >> put: anEntry [
 	| txn |
 	txn := soil newTransaction.
 	^ [ | key |
-	  key := (self descriptionIn: txn) add: anEntry.
+	  key := (self workspaceIn: txn) add: anEntry.
 	  txn commit.
 	  key ]
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
@@ -108,7 +108,7 @@ SoilQueueTest >> testAFinishedWorkUnitLeavesTheOrdering [
 
 	txn := soil newTransaction.
 	self
-		assert: ((self descriptionIn: txn) entryAt: key ifAbsent: [ #gone ])
+		assert: ((self workspaceIn: txn) entryAt: key ifAbsent: [ #gone ])
 		equals: #gone.
 	txn abort
 ]
@@ -142,8 +142,8 @@ SoilQueueTest >> testAWorkUnitClaimsBeforeItWorks [
 	queue claim: key.
 
 	txn := soil newTransaction.
-	self assert: ((self descriptionIn: txn) entryAt: key) isClaimed.
-	self assert: ((self descriptionIn: txn) entryAt: key) claimedAt notNil.
+	self assert: ((self workspaceIn: txn) entryAt: key) isClaimed.
+	self assert: ((self workspaceIn: txn) entryAt: key) claimedAt notNil.
 	txn abort
 ]
 
@@ -263,4 +263,11 @@ SoilQueueTest >> workOffEverything [
 	queue recoverOrphanedClaims.
 	(SoilQueueWorker on: queue) run.
 	^ queue
+]
+
+{ #category : #helpers }
+SoilQueueTest >> workspaceIn: aTransaction [
+	"where the entries are: the workspace the description holds"
+
+	^ (self descriptionIn: aTransaction) workspace
 ]

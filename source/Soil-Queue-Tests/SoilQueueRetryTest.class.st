@@ -58,7 +58,7 @@ SoilQueueRetryTest >> onlyEntry [
 	| txn |
 	txn := soil newTransaction.
 	^ [ | found |
-	  (self descriptionIn: txn) keysAndEntriesDo: [ :key :entry |
+	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
 		found := { entry state. entry eligibleAt. entry failureRetries. entry orphanedRetries } ].
 	  found ]
 		ensure: [ txn abort ]
@@ -75,7 +75,7 @@ SoilQueueRetryTest >> put: aBlock [
 	"aBlock builds the entry on the target read in the same transaction"
 
 	^ self inTransaction: [ :txn |
-		(self descriptionIn: txn) add: (self due: (aBlock value: (txn root at: #target))) ]
+		(self workspaceIn: txn) add: (self due: (aBlock value: (txn root at: #target))) ]
 ]
 
 { #category : #helpers }
@@ -220,4 +220,11 @@ SoilQueueRetryTest >> testTheDefaultsAreThreeRetriesFromOneSecondUpToAnHour [
 	self assert: description failureRetryLimit equals: 3.
 	self assert: description backoffBase equals: 1 second.
 	self assert: description backoffCap equals: 1 hour
+]
+
+{ #category : #helpers }
+SoilQueueRetryTest >> workspaceIn: aTransaction [
+	"where the entries are: the workspace the description holds"
+
+	^ (self descriptionIn: aTransaction) workspace
 ]
