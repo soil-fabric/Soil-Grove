@@ -206,7 +206,7 @@ SoilQueueDispatchTest >> testNoMoreWorkersThanTheLimit [
 		self put: [ :target | SoilQueueTestRepeatingEntry on: target ] ].
 	queue := SoilQueueTestUnforkedQueue from: self queue.
 	queue runStep.
-	started := queue workers.
+	started := queue started.
 	started do: [ :each | each run ].
 
 	self assert: started size equals: 2.
@@ -229,13 +229,14 @@ SoilQueueDispatchTest >> testNoWorkerIsStartedWhenNothingIsDue [
 
 { #category : #tests }
 SoilQueueDispatchTest >> testTheDispatcherStartsAWorkerForDueWork [
-	"the one test that forks, because forking is what it is about"
+	"the one test that forks, because forking is what it is about. The worker is counted as
+	started: by the time the count is read it may already be done"
 
 	| queue |
 	self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
-	queue := self queue.
+	queue := SoilQueueTestRecordingQueue from: self queue.
 	queue runStep.
-	self assert: queue workers size equals: 1.
+	self assert: queue started size equals: 1.
 
 	self waitUntil: [ queue workers isEmpty ].
 	self assert: self targetEffects equals: #( #ran )
