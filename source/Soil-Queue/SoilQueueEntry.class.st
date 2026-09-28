@@ -21,6 +21,10 @@ on, not scheduled for then, because a rate at the outlet can hold me back arbitr
 long. #id is what makes the key unique, which the index needs: moving a key is refused
 on an index with duplicate keys, and moving a key is what backoff does.
 
+On a grouped lane it is #groupId instead of #eligibleAt that ends up in the key: my
+group, then my place in it, then #id. #eligibleAt stays with me there and is read from
+me, so a backoff holds up my group rather than moving me to its end.
+
 My resumption semantics answer the one question an abort leaves open, and the queue
 cannot answer it for me: *what holds afterwards*. An image can crash at any moment and
 a rolling release interrupts work as a matter of routine, so every entry has to say
@@ -58,7 +62,8 @@ Class {
 		'id',
 		'progress',
 		'orphanedRetries',
-		'failureRetries'
+		'failureRetries',
+		'groupId'
 	],
 	#category : #'Soil-Queue'
 }
@@ -176,6 +181,23 @@ SoilQueueEntry >> giveUp: anError in: aTransaction [
 	The place for a subclass to put its target into its error state -- a flow instance
 	that ends in error, say. What that means is the subclass's business; the queue only
 	says when. Nothing by default"
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> groupId [
+	"the group I belong to on a grouped lane: of one group, only one entry is out at a time,
+	and they go out in the order they came in. An integer or a byte array of the width the
+	lane's format says. On any other lane nobody asks"
+
+	^ groupId
+]
+
+{ #category : #accessing }
+SoilQueueEntry >> groupId: anIntegerOrByteArray [
+	"set before I am put into a queue: the group is written into my key there and does not
+	change with me afterwards"
+
+	groupId := anIntegerOrByteArray
 ]
 
 { #category : #accessing }

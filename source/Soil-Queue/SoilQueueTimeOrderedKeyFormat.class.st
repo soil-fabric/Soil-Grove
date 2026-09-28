@@ -36,3 +36,16 @@ SoilQueueTimeOrderedKeyFormat >> millisecondsOf: aDateAndTime [
 		^ self error: 'a due time before 1970 has no place in a key: ' , aDateAndTime printString ].
 	^ milliseconds
 ]
+
+{ #category : #testing }
+SoilQueueTimeOrderedKeyFormat >> ordersByDueTime [
+
+	^ true
+]
+
+{ #category : #accessing }
+SoilQueueTimeOrderedKeyFormat >> partsSize [
+	"eight bytes of due time, eight of id"
+
+	^ 16
+]
