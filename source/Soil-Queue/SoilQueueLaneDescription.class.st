@@ -45,14 +45,22 @@ SoilQueueLaneDescription >> includesKey: anIndexKey [
 
 { #category : #converting }
 SoilQueueLaneDescription >> keyFor: anEntry [
+	"the key for anEntry when my format needs nothing but the entry to build it"
+
+	^ self keyFor: anEntry in: nil
+]
+
+{ #category : #converting }
+SoilQueueLaneDescription >> keyFor: anEntry in: aQueueWorkspace [
 	"the chain: my format orders, and my section places the result -- marker first,
-	padding last, filling the whole key size.
+	padding last, filling the whole key size. The workspace is there for a format that
+	has to look at what I hold already to know where a new entry goes.
 
 	No single participant knows the whole key. The entry supplies values and never a key,
 	so that two entries of one lane cannot sort by different rules."
 
 	^ range keyWith: (ByteArray streamContents: [ :parts |
-		format appendKeyPartsFor: anEntry on: parts ])
+		format appendKeyPartsFor: anEntry in: self of: aQueueWorkspace on: parts ])
 ]
 
 { #category : #accessing }

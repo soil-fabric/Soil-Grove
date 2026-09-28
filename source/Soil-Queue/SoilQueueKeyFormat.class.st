@@ -24,8 +24,34 @@ SoilQueueKeyFormat class >> isAbstract [
 ]
 
 { #category : #converting }
+SoilQueueKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of: aQueueWorkspace on: aWriteStream [
+	"add my part of the key for an entry that comes into a lane. Most formats need nothing
+	but the entry; one that numbers its entries has to look at what the lane holds already,
+	and the workspace is where that is read"
+
+	^ self appendKeyPartsFor: anEntry on: aWriteStream
+]
+
+{ #category : #converting }
 SoilQueueKeyFormat >> appendKeyPartsFor: anEntry on: aWriteStream [
 	"add my part of the key for anEntry, and nothing else"
+
+	^ self subclassResponsibility
+]
+
+{ #category : #testing }
+SoilQueueKeyFormat >> ordersByDueTime [
+	"whether the due time is in my keys. If it is, an entry whose due time changes has to
+	move to a new key, and the first entry of a lane that is not due says that none behind
+	it is. If not, the key stays where it is and the due time is read from the entry"
+
+	^ self subclassResponsibility
+]
+
+{ #category : #accessing }
+SoilQueueKeyFormat >> partsSize [
+	"how many bytes my part of a key takes -- a lane of mine needs that much room behind its
+	marker"
 
 	^ self subclassResponsibility
 ]

@@ -91,7 +91,7 @@ SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 	of."
 
 	| key |
-	key := aLaneDescription keyFor: anEntry.
+	key := aLaneDescription keyFor: anEntry in: self.
 	index at: key put: anEntry.
 	^ key asIndexKeyOfSize: keySize
 ]
@@ -108,6 +108,9 @@ SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 	(lanes anySatisfy: [ :each | each name = aSymbol ]) ifTrue: [
 		^ self error: 'there is a lane named ' , aSymbol printString , ' already' ].
 	width := self markerWidth.
+	aFormat partsSize > (keySize - width) ifTrue: [
+		^ self error: 'keys of ' , aFormat partsSize printString , ' bytes do not fit behind a marker of '
+			, width printString , ' in a key size of ' , keySize printString ].
 	taken := (lanes collect: [ :each | each range prefix ]) asSet.
 	prefix := (0 to: (256 raisedTo: width) - 1)
 		detect: [ :each | (taken includes: each) not ]
@@ -257,6 +260,26 @@ SoilQueueWorkspace >> keySize [
 ]
 
 { #category : #accessing }
+SoilQueueWorkspace >> lastKeyFrom: aFirstKey to: aLastKey [
+	"the last key between two keys, both included, in the transaction I was read in -- its
+	own additions counted, its own removals not -- or nil when there is none. As bytes of
+	my key size, for a format to read its parts out of.
+
+	First a jump to the start to see whether anything is there at all, then one past the
+	end and a step back. The step back needs a position to step back from, and an index
+	with nothing in it has none; the first jump rules that out."
+
+	| iterator first last found |
+	first := aFirstKey asIndexKeyOfSize: keySize.
+	last := aLastKey asIndexKeyOfSize: keySize.
+	iterator := index newIterator.
+	found := iterator nextKeyCloseTo: first.
+	(found isNil or: [ found > last ]) ifTrue: [ ^ nil ].
+	iterator nextKeyCloseTo: last + 1.
+	^ iterator previousAssociation key asByteArrayOfSize: keySize
+]
+
+{ #category : #accessing }
 SoilQueueWorkspace >> laneFor: anIndexKey [
 	"the lane a key lies in, found from the key alone: every key carries its lane's marker"
 
@@ -296,10 +319,15 @@ SoilQueueWorkspace >> moveKey: aKey for: anEntry [
 	One move rather than a removal and an insertion, because the removal answers an
 	unloaded proxy and an insertion would resolve it: the target would be read from disk
 	only to change the number it is filed under. Asked of the index and not of an iterator
-	on it -- the index is the one that writes the journal and marks itself for the commit."
+	on it -- the index is the one that writes the journal and marks itself for the commit.
 
-	| newKey |
-	newKey := ((self laneFor: aKey) keyFor: anEntry) asIndexKeyOfSize: keySize.
+	A lane whose keys carry no due time keeps the key: the entry waits where it is, and its
+	due time is read from it."
+
+	| lane newKey |
+	lane := self laneFor: aKey.
+	lane format ordersByDueTime ifFalse: [ ^ aKey ].
+	newKey := (lane keyFor: anEntry in: self) asIndexKeyOfSize: keySize.
 	newKey = aKey ifTrue: [ ^ aKey ].
 	index moveKey: aKey to: newKey.
 	^ newKey
