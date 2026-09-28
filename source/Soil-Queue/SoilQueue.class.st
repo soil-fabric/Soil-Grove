@@ -134,17 +134,40 @@ SoilQueue >> assignNextIn: aLane [
 	dispatcher here -- otherwise an entry pushed out to later by the work unit that just
 	ran would wake nobody."
 
+	^ self assignNextIn: aLane preferring: nil
+]
+
+{ #category : #working }
+SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aBlock [
+	"the same with no key to carry on from"
+
+	^ self
+		assignNextIn: aLane
+		dueAt: aDateAndTime
+		preferring: nil
+		in: aTransaction
+		ifNone: aBlock
+]
+
+{ #category : #working }
+SoilQueue >> assignNextIn: aLane preferring: aKey [
+	"what a worker of aLane asks for after it has worked on aKey, nil the first time. On a
+	grouped lane that says which chain it is on, so that it can carry on with it -- see
+	#assignNextIn:"
+
 	self shouldStop ifTrue: [ ^ nil ].
 	^ self withTransactionDo: [ :txn |
-		self assignNextIn: aLane dueAt: self now in: txn ifNone: [ :time |
+		self assignNextIn: aLane dueAt: self now preferring: aKey in: txn ifNone: [ :time |
 			time ifNotNil: [ self noteNextDueAt: time ].
 			nil ] ]
 ]
 
 { #category : #working }
-SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aBlock [
-	"hand out the oldest due entry of aLane that nobody else holds, and remember that it is
-	out.
+SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTransaction ifNone: aBlock [
+	"hand out the next due entry of aLane that nobody else holds, and remember that it is
+	out. On a lane ordered by due time that is the oldest due one; on a grouped lane the
+	first of a group, preferring the group of aKey -- the entry the asking worker did last --
+	and otherwise taking the groups in turn from behind the one handed out last.
 
 	Under the mutex, because this is where competing workers meet. What crosses the
 	boundary is a key: the transaction this scanned in is not the one the work happens in.
@@ -166,6 +189,8 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aB
 			nextDueAt: aDateAndTime
 			in: (workspace laneNamed: aLane name)
 			skipping: inFlight
+			preferring: aKey
+			after: aLane lastIssuedKey
 			ifNone: [ :time | nextTime := time. nil ].
 		found ifNotNil: [
 			| free |
@@ -176,7 +201,8 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aB
 					found := nil ]
 				ifFalse: [
 					inFlight add: found.
-					aLane noteIssueAt: aDateAndTime ] ].
+					aLane noteIssueAt: aDateAndTime.
+					aLane lastIssuedKey: found ] ].
 		found ].
 	^ key ifNil: [ aBlock cull: nextTime ]
 ]

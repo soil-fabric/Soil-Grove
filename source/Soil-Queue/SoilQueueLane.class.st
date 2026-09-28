@@ -29,7 +29,8 @@ Class {
 		'backoffBase',
 		'backoffCap',
 		'rateCounter',
-		'pool'
+		'pool',
+		'lastIssuedKey'
 	],
 	#category : #'Soil-Queue'
 }
@@ -125,6 +126,21 @@ SoilQueueLane >> initialize [
 
 	super initialize.
 	rateCounter := SoilQueueRateCounter new
+]
+
+{ #category : #accessing }
+SoilQueueLane >> lastIssuedKey [
+	"the key handed out last, nil before the first. A grouped lane takes its groups in turn
+	from behind this one, so that low group ids do not always win. Kept in memory only: after
+	a start the turn begins at the front again, which costs nothing but one round"
+
+	^ lastIssuedKey
+]
+
+{ #category : #accessing }
+SoilQueueLane >> lastIssuedKey: anIndexKey [
+
+	lastIssuedKey := anIndexKey
 ]
 
 { #category : #accessing }

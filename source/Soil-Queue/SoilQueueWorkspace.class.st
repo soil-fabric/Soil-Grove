@@ -173,11 +173,21 @@ SoilQueueWorkspace >> dueCountAt: aDateAndTime in: aLaneDescription upTo: aLimit
 	because a lane is ordered by due time and nothing behind it can be due.
 
 	Only pending entries count. One that says claimed is with a worker already, or waiting
-	for the recovery pass, and in neither case does it call for another worker."
+	for the recovery pass, and in neither case does it call for another worker.
+
+	On a grouped lane only the first entry of each group can go, so only those are counted,
+	and a first one that is not due says nothing about the next group: all groups are
+	looked at, one jump each."
 
 	| count |
 	count := 0.
 	aLimit < 1 ifTrue: [ ^ count ].
+	aLaneDescription format ordersByDueTime ifFalse: [
+		self groupHeadsIn: aLaneDescription do: [ :key :entry |
+			(entry isPending and: [ entry eligibleAt <= aDateAndTime ]) ifTrue: [
+				count := count + 1.
+				count >= aLimit ifTrue: [ ^ count ] ] ].
+		^ count ].
 	self keysAndEntriesIn: aLaneDescription do: [ :key :entry |
 		entry eligibleAt > aDateAndTime ifTrue: [ ^ count ].
 		entry isPending ifTrue: [
@@ -196,6 +206,50 @@ SoilQueueWorkspace >> entryAt: aKey [
 SoilQueueWorkspace >> entryAt: aKey ifAbsent: aBlock [
 
 	^ index at: aKey ifAbsent: aBlock
+]
+
+{ #category : #enumerating }
+SoilQueueWorkspace >> groupHeadsIn: aLaneDescription do: aBlock [
+	"the first entry of every group of a grouped lane with its key, in key order"
+
+	self
+		groupHeadsIn: aLaneDescription
+		from: aLaneDescription range firstIndexKey
+		to: aLaneDescription range lastIndexKey
+		do: aBlock
+]
+
+{ #category : #enumerating }
+SoilQueueWorkspace >> groupHeadsIn: aLaneDescription from: aFirstIndexKey to: aLastIndexKey do: aBlock [
+	"the first entry of every group that begins between two keys, with its key. One jump per
+	group rather than one step per entry: from the head of a group straight past its last
+	possible key. The first entry this transaction sees is the head -- one that is done and
+	gone is not in the way"
+
+	| iterator scanKey found |
+	iterator := index newIterator.
+	scanKey := aFirstIndexKey.
+	[ scanKey <= aLastIndexKey
+		and: [ (found := iterator nextKeyCloseTo: scanKey) notNil
+		and: [ found <= aLastIndexKey ] ] ] whileTrue: [
+			aBlock value: found value: (iterator at: found).
+			scanKey := (self lastIndexKeyOfGroupOf: found in: aLaneDescription) + 1 ]
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> headOfGroupOf: anIndexKey in: aLaneDescription [
+	"the first entry of the group a key belongs to, as key -> entry, or nil when the group
+	holds nothing any more"
+
+	| format keyBytes first last iterator found |
+	format := aLaneDescription format.
+	keyBytes := anIndexKey asByteArrayOfSize: keySize.
+	first := (format firstKeyOfGroupOf: keyBytes in: aLaneDescription range) asIndexKeyOfSize: keySize.
+	last := self lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescription.
+	iterator := index newIterator.
+	found := iterator nextKeyCloseTo: first.
+	(found notNil and: [ found <= last ]) ifFalse: [ ^ nil ].
+	^ found -> (iterator at: found)
 ]
 
 { #category : #accessing }
@@ -257,6 +311,15 @@ SoilQueueWorkspace >> keysAndEntriesIn: aLaneDescription do: aBlock [
 SoilQueueWorkspace >> keySize [
 
 	^ keySize
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescription [
+	"the highest key the group of anIndexKey can have, in the form the index compares in"
+
+	^ (aLaneDescription format
+		lastKeyOfGroupOf: (anIndexKey asByteArrayOfSize: keySize)
+		in: aLaneDescription range) asIndexKeyOfSize: keySize
 ]
 
 { #category : #accessing }
@@ -335,8 +398,91 @@ SoilQueueWorkspace >> moveKey: aKey for: anEntry [
 
 { #category : #accessing }
 SoilQueueWorkspace >> nextDueAt: aDateAndTime in: aLaneDescription skipping: aCollection ifNone: aBlock [
-	"the key of the oldest entry of a lane that is due, skipping the keys that are already
-	out.
+	"the key of the next entry of a lane that is due, skipping the keys that are already
+	out -- with no group to prefer and no place to start from"
+
+	^ self
+		nextDueAt: aDateAndTime
+		in: aLaneDescription
+		skipping: aCollection
+		preferring: nil
+		after: nil
+		ifNone: aBlock
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> nextDueAt: aDateAndTime in: aLaneDescription skipping: aCollection preferring: aPreferredKey after: aLastKey ifNone: aBlock [
+	"the key of the next entry of a lane that is due, skipping the keys that are already
+	out. When nothing is due, aBlock is evaluated with the time the next entry becomes due,
+	or with nil when there is nothing at all.
+
+	A lane ordered by due time answers its oldest due entry and ignores the two keys. A
+	grouped lane answers the first entry of a group, and only of a group whose first entry
+	is not out: the group of aPreferredKey if it has one due -- a worker carrying on with its
+	own chain --, otherwise the next group behind that of aLastKey, round the end of the
+	lane and back, so that low group ids do not always win. Either key may be nil."
+
+	^ aLaneDescription format ordersByDueTime
+		ifTrue: [
+			self
+				nextOldestDueAt: aDateAndTime
+				in: aLaneDescription
+				skipping: aCollection
+				ifNone: aBlock ]
+		ifFalse: [
+			self
+				nextGroupHeadDueAt: aDateAndTime
+				in: aLaneDescription
+				skipping: aCollection
+				preferring: aPreferredKey
+				after: aLastKey
+				ifNone: aBlock ]
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> nextGroupHeadDueAt: aDateAndTime in: aLaneDescription skipping: aCollection preferring: aPreferredKey after: aLastKey ifNone: aBlock [
+	"see #nextDueAt:in:skipping:preferring:after:ifNone:. A group whose first entry is out,
+	or claimed with nobody holding it, goes without: its next entry must not overtake it.
+	A first entry that is not due does not end the scan the way it does on a lane ordered by
+	due time -- a later group may have one that is -- it only offers its time"
+
+	| range earliest goes start |
+	range := aLaneDescription range.
+	earliest := nil.
+	goes := [ :key :entry |
+		((aCollection includes: key) or: [ entry isPending not ])
+			ifTrue: [ false ]
+			ifFalse: [
+				entry eligibleAt <= aDateAndTime
+					ifTrue: [ true ]
+					ifFalse: [
+						earliest := earliest
+							ifNil: [ entry eligibleAt ]
+							ifNotNil: [ :time | time min: entry eligibleAt ].
+						false ] ] ].
+	(aPreferredKey notNil and: [ range includesKey: aPreferredKey ]) ifTrue: [
+		(self headOfGroupOf: aPreferredKey in: aLaneDescription) ifNotNil: [ :head |
+			(goes value: head key value: head value) ifTrue: [ ^ head key ] ] ].
+	start := (aLastKey notNil and: [ range includesKey: aLastKey ])
+		ifTrue: [ (self lastIndexKeyOfGroupOf: aLastKey in: aLaneDescription) + 1 ]
+		ifFalse: [ range firstIndexKey ].
+	self
+		groupHeadsIn: aLaneDescription
+		from: start
+		to: range lastIndexKey
+		do: [ :key :entry | (goes value: key value: entry) ifTrue: [ ^ key ] ].
+	self
+		groupHeadsIn: aLaneDescription
+		from: range firstIndexKey
+		to: start - 1
+		do: [ :key :entry | (goes value: key value: entry) ifTrue: [ ^ key ] ].
+	^ aBlock cull: earliest
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> nextOldestDueAt: aDateAndTime in: aLaneDescription skipping: aCollection ifNone: aBlock [
+	"the key of the oldest entry of a lane ordered by due time that is due, skipping the keys
+	that are already out.
 
 	When nothing is due, aBlock is evaluated with the time the next entry becomes due, or
 	with nil when there is nothing at all -- so a caller can sleep exactly as long as it

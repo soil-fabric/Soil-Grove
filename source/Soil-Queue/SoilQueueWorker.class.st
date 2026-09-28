@@ -26,7 +26,8 @@ Class {
 		'queue',
 		'lane',
 		'process',
-		'currentKey'
+		'currentKey',
+		'lastKey'
 	],
 	#category : #'Soil-Queue'
 }
@@ -87,12 +88,16 @@ SoilQueueWorker >> runOnce [
 
 	The release happens whatever happened, or a work unit that throws would take its entry
 	out of circulation until the image restarts. A throwing work unit is counted on the
-	queue and does not cost me: a transient failure must not cost a worker."
+	queue and does not cost me: a transient failure must not cost a worker.
+
+	The key I worked on last goes with the question for the next one: on a grouped lane
+	that is how I carry on with my own chain."
 
 	| key |
-	key := queue assignNextIn: lane.
+	key := queue assignNextIn: lane preferring: lastKey.
 	key ifNil: [ ^ nil ].
 	currentKey := key.
+	lastKey := key.
 	[ [ queue claim: key.
 	    queue work: key ]
 		on: Error
