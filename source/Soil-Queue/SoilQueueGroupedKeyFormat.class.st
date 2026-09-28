@@ -47,8 +47,8 @@ SoilQueueGroupedKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of:
 	| group last sequence |
 	group := self groupBytesOf: anEntry.
 	last := aQueueWorkspace
-		lastKeyFrom: (aLaneDescription range keyWith: group)
-		to: (aLaneDescription range keyWith: group , (ByteArray new: 12 withAll: 255)).
+		lastKeyFrom: (self firstKeyOfGroup: group in: aLaneDescription range)
+		to: (self lastKeyOfGroup: group in: aLaneDescription range).
 	sequence := last
 		ifNil: [ 1 ]
 		ifNotNil: [ (self sequenceIn: last behind: aLaneDescription range width) + 1 ].
@@ -66,6 +66,19 @@ SoilQueueGroupedKeyFormat >> appendKeyPartsFor: anEntry on: aWriteStream [
 	depends on what the group holds already"
 
 	^ self error: 'a grouped key needs the lane and the workspace it goes into'
+]
+
+{ #category : #accessing }
+SoilQueueGroupedKeyFormat >> firstKeyOfGroup: aGroup in: aRange [
+	"the lowest key a group can have in a section: the group, and nothing behind it"
+
+	^ aRange keyWith: aGroup
+]
+
+{ #category : #accessing }
+SoilQueueGroupedKeyFormat >> firstKeyOfGroupOf: aKey in: aRange [
+
+	^ self firstKeyOfGroup: (self groupIn: aKey of: aRange) in: aRange
 ]
 
 { #category : #converting }
@@ -89,6 +102,15 @@ SoilQueueGroupedKeyFormat >> groupBytesOf: anEntry [
 ]
 
 { #category : #accessing }
+SoilQueueGroupedKeyFormat >> groupIn: aKey of: aRange [
+	"the group a key of a section belongs to: the bytes behind the section's marker"
+
+	| start |
+	start := aRange width + 1.
+	^ aKey copyFrom: start to: start + groupIdSize - 1
+]
+
+{ #category : #accessing }
 SoilQueueGroupedKeyFormat >> groupIdSize [
 
 	^ groupIdSize
@@ -99,6 +121,19 @@ SoilQueueGroupedKeyFormat >> initialize [
 
 	super initialize.
 	groupIdSize := 8
+]
+
+{ #category : #accessing }
+SoilQueueGroupedKeyFormat >> lastKeyOfGroup: aGroup in: aRange [
+	"the highest key a group can have in a section: every byte behind the group set"
+
+	^ aRange keyWith: aGroup , (ByteArray new: 12 withAll: 255)
+]
+
+{ #category : #accessing }
+SoilQueueGroupedKeyFormat >> lastKeyOfGroupOf: aKey in: aRange [
+
+	^ self lastKeyOfGroup: (self groupIn: aKey of: aRange) in: aRange
 ]
 
 { #category : #testing }

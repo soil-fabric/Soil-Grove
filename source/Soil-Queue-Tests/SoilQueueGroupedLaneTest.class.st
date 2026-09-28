@@ -3,7 +3,7 @@ A grouped lane keeps the entries of each group in the order they came in: its ke
 group, then a sequence number within it, then the entry's id.
 
 These are the keys only. Which entry of a lane goes out, and that only one of a group is
-out at a time, is the queue's part and tested with it.
+out at a time, is SoilQueueGroupedDispatchTest's.
 "
 Class {
 	#name : #SoilQueueGroupedLaneTest,
