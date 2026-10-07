@@ -86,9 +86,11 @@ SoilQueueWorker >> run [
 SoilQueueWorker >> runOnce [
 	"one entry, and answer its key -- nil when nothing came, which is what ends me.
 
-	The release happens whatever happened, or a work unit that throws would take its entry
-	out of circulation until the image restarts. A throwing work unit is counted on the
-	queue and does not cost me: a transient failure must not cost a worker.
+	The release happens whatever happened, or an entry whose step failed would stay out of
+	circulation. An error that gets out of the step -- the commit threw, a conflict did not
+	resolve, the bookkeeping of a failed work unit threw -- is the queue's to deal with, and
+	it does not cost me: a transient failure must not cost a worker. The queue counts it and
+	gives the entry back, see SoilQueue>>#stepFailed:on:.
 
 	The key I worked on last goes with the question for the next one: on a grouped lane
 	that is how I carry on with my own chain."
@@ -101,7 +103,7 @@ SoilQueueWorker >> runOnce [
 	[ [ queue claim: key.
 	    queue work: key ]
 		on: Error
-		do: [ :anError | queue handleStepError: anError ] ]
+		do: [ :anError | queue stepFailed: anError on: key ] ]
 		ensure: [
 			currentKey := nil.
 			queue release: key ].

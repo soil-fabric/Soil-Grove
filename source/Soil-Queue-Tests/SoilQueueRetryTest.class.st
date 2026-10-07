@@ -200,6 +200,76 @@ SoilQueueRetryTest >> testAnEntryThatKeepsFailingGivesUpAfterItsBudget [
 ]
 
 { #category : #tests }
+SoilQueueRetryTest >> testAnEntryThatCannotBeGivenBackStaysClaimed [
+	"giving it back is the queue's business, and when that fails too there is nobody left to
+	ask: it stays claimed, both failures are counted, and the next start finds it"
+
+	| key queue |
+	key := self put: [ :target | SoilQueueTestUncompensableEntry on: target ].
+	queue := self queue.
+	queue claim: key.
+	queue stepFailed: (Error new messageText: 'the commit failed'; yourself) on: key.
+	self assert: self onlyEntry first equals: #claimed.
+	self assert: queue stepErrorCount equals: 2.
+	self assert: queue lastStepError messageText equals: 'the cleanup cannot be done'
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryThatKeepsFailingOutsideItsWorkUnitIsParkedAtTheLimit [
+	"the same limit as for a lost worker, because to the queue it is one: a claim that nobody
+	finished"
+
+	| queue worker |
+	self inTransaction: [ :txn |
+		(self descriptionIn: txn) orphanedRetryLimit: 2 ].
+	SoilQueueTestConflictingEntry conflictsToRaise: 99.
+	self put: [ :target | SoilQueueTestConflictingEntry on: target ].
+	queue := self queue.
+	worker := SoilQueueWorker on: queue.
+	2 timesRepeat: [
+		worker runOnce.
+		clock advanceBy: 1 hour ].
+	self assert: self onlyEntry first equals: #pending.
+	worker runOnce.
+	self assert: self onlyEntry isNil
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryWhoseStepFailsOutsideItsWorkUnitIsGivenBackAndWaits [
+	"a work unit that throws is booked. An error around it is not: the commit threw, a
+	conflict did not resolve. The entry still says claimed and no worker holds it, which is
+	what a lost worker leaves behind, so it goes back the way an orphan goes back --
+	counted as one, and after a wait, so that a commit that is not going through right now
+	does not use up the budget in milliseconds"
+
+	| queue |
+	SoilQueueTestConflictingEntry conflictsToRaise: 99.
+	self put: [ :target | SoilQueueTestConflictingEntry on: target ].
+	queue := self queue.
+	(SoilQueueWorker on: queue) runOnce.
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 0. 1 }.
+	self assert: queue stepErrorCount equals: 1
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testTheWaitOfAnEntryThatIsGivenBackDoublesWithEachTime [
+
+	| queue worker |
+	SoilQueueTestConflictingEntry conflictsToRaise: 99.
+	self put: [ :target | SoilQueueTestConflictingEntry on: target ].
+	queue := self queue.
+	worker := SoilQueueWorker on: queue.
+	worker runOnce.
+	clock advanceBy: 1 second.
+	worker runOnce.
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 2 seconds. 0. 2 }
+]
+
+{ #category : #tests }
 SoilQueueRetryTest >> testTheBackoffDoublesUpToItsCap [
 
 	| lane |

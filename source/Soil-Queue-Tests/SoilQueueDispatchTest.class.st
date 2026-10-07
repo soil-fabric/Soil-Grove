@@ -177,18 +177,22 @@ SoilQueueDispatchTest >> testAWriteConflictRunsTheSameWorkUnitAgain [
 
 { #category : #tests }
 SoilQueueDispatchTest >> testAnEntryWhoseWorkThrowsIsNotHandedStraightBack [
-	"a thrown work unit discards its transaction, so the entry keeps saying claimed. If the
-	scan handed a claimed entry out again, the next worker would get it at once and the one
-	after that too -- a worker spinning on one broken entry for ever. It waits for the
-	recovery pass instead."
+	"a step that fails outside its work unit leaves the entry given back and waiting. If it
+	were handed out again at once, the next worker would get it and the one after that too
+	-- a worker spinning on one broken entry for ever. The wait is what stops that: the
+	entry is not due for a while, and the worker that finds nothing due ends"
 
-	| key queue |
+	| queue txn states |
 	SoilQueueTestConflictingEntry conflictsToRaise: 99.
-	key := self put: [ :target | SoilQueueTestConflictingEntry on: target ].
+	self put: [ :target | SoilQueueTestConflictingEntry on: target ].
 	queue := self queue.
 	(SoilQueueWorker on: queue) run.
 
-	self assert: (self stateOf: key) equals: #claimed.
+	txn := soil newTransaction.
+	states := OrderedCollection new.
+	[ (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry | states add: entry state ] ]
+		ensure: [ txn abort ].
+	self assert: states asArray equals: #( #pending ).
 	self assert: SoilQueueTestConflictingEntry attempts equals: queue conflictLimit
 ]
 

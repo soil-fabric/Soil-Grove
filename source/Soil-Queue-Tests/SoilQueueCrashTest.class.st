@@ -32,25 +32,40 @@ SoilQueueCrashTest >> crashAfterAnEffectOn: aKey [
 	it never came. All that is left is the claim"
 
 	self inTransaction: [ :txn | (txn root at: #target) addEffect: #interrupted ].
-	self queue claim: aKey
+	self queue claim: (self currentKeyOf: aKey)
 ]
 
 { #category : #helpers }
 SoilQueueCrashTest >> crashBeforeTheNextStepOn: aKey [
 	"the simpler case: the entry was taken and the image went away before it did anything"
 
-	self queue claim: aKey
+	self queue claim: (self currentKeyOf: aKey)
+]
+
+{ #category : #helpers }
+SoilQueueCrashTest >> currentKeyOf: aKey [
+	"the key the entry that was put in under aKey lies under now. An entry that is given back
+	waits first, and its key moves with the time it waits for -- what stays is its id"
+
+	| id txn |
+	id := self idOf: aKey.
+	txn := soil newTransaction.
+	^ [ | found |
+	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
+		entry id = id ifTrue: [ found := key ] ].
+	  found ifNil: [ aKey ] ]
+		ensure: [ txn abort ]
 ]
 
 { #category : #helpers }
 SoilQueueCrashTest >> deadLetters [
-	"each parked entry as its key, its state and how often it lost its worker"
+	"each parked entry as its id, its state and how often it lost its worker"
 
 	| txn letters |
 	txn := soil newTransaction.
 	letters := OrderedCollection new.
 	[ (self workspaceIn: txn) deadLettersDo: [ :key :entry |
-		letters add: { key. entry state. entry orphanedRetries } ] ]
+		letters add: { entry id. entry state. entry orphanedRetries } ] ]
 		ensure: [ txn abort ].
 	^ letters asArray
 ]
@@ -65,13 +80,27 @@ SoilQueueCrashTest >> descriptionIn: aTransaction [
 SoilQueueCrashTest >> entryAt: aKey do: aBlock [
 	"an entry comes back as a proxy, so the question has to be asked inside the transaction
 	that can still resolve it. Answers nil, without evaluating the block, when the entry is
-	no longer in the ordering."
+	no longer in the ordering.
 
-	| txn |
+	Found by the id it was put in with, not by aKey: an entry that is given back waits
+	first, and its key moves with the time it waits for"
+
+	| txn id |
+	id := self idOf: aKey.
 	txn := soil newTransaction.
-	^ [ ((self workspaceIn: txn) entryAt: aKey ifAbsent: [ nil ])
-		ifNotNil: [ :entry | aBlock value: entry ] ]
+	^ [ | found |
+	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
+		entry id = id ifTrue: [ found := entry ] ].
+	  found ifNotNil: [ aBlock value: found ] ]
 		ensure: [ txn abort ]
+]
+
+{ #category : #helpers }
+SoilQueueCrashTest >> idOf: aKey [
+	"the eight bytes that tell an entry apart, in the key it was put in under: the due time
+	comes first, then the id"
+
+	^ (aKey asByteArrayOfSize: 24) copyFrom: 9 to: 16
 ]
 
 { #category : #helpers }
@@ -141,6 +170,10 @@ SoilQueueCrashTest >> setUp [
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24).
 	self inTransaction: [ :txn |
+		"an entry that is given back waits, by the curve of its lane. These tests drive a
+		restart and want the entry again at once, so the wait is nothing; the wait itself
+		is tested where it is the point"
+		(self descriptionIn: txn) backoffBase: 0 seconds.
 		txn root at: #target put: SoilQueueTestTarget new ]
 ]
 
@@ -242,7 +275,7 @@ SoilQueueCrashTest >> testAnEntryThatKeepsLosingItsWorkerIsParked [
 	self crashBeforeTheNextStepOn: key.
 	self queue recoverOrphanedClaims.
 	self assert: (self retriesOf: key) isNil.
-	self assert: self deadLetters equals: { { key. #deadLetter. 2 } }
+	self assert: self deadLetters equals: { { self idOf: key. #deadLetter. 2 } }
 ]
 
 { #category : #tests }
