@@ -29,7 +29,7 @@ SoilQueueTestPostponingEntry >> performIn: aTransaction [
 
 	super performIn: aTransaction.
 	self runCount = 1 ifFalse: [ ^ #finished ].
-	self eligibleAt: self eligibleAt + delay.
+	self readyAt: self readyAt + delay.
 	^ #more
 ]
 

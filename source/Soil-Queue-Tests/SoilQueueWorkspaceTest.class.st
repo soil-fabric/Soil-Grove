@@ -42,7 +42,7 @@ SoilQueueWorkspaceTest >> workspaceIn: aTransaction [
 SoilQueueWorkspaceTest >> entryDueIn: aDuration [
 
 	^ (SoilQueueTestEntry on: 'work')
-		eligibleAt: DateAndTime now + aDuration;
+		readyAt: DateAndTime now + aDuration;
 		yourself
 ]
 
@@ -96,7 +96,7 @@ SoilQueueWorkspaceTest >> testAKeyCarriesTheDueTimeInFrontOfTheId [
 	self assert: (key copyFrom: 9 to: 16) equals: entry id.
 	self
 		assert: (key first: 8) asInteger
-		equals: (entry eligibleAt - DateAndTime unixEpoch) asMilliSeconds
+		equals: (entry readyAt - DateAndTime unixEpoch) asMilliSeconds
 ]
 
 { #category : #tests }
@@ -141,7 +141,7 @@ SoilQueueWorkspaceTest >> testNothingDueAnswersWhenTheNextOneIs [
 	| txn due |
 	self addQueueNamed: #work.
 	due := DateAndTime now + 1 hour.
-	self put: ((self entryDueIn: 0 seconds) eligibleAt: due; yourself).
+	self put: ((self entryDueIn: 0 seconds) readyAt: due; yourself).
 
 	txn := soil newTransaction.
 	self

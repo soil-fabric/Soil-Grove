@@ -34,7 +34,7 @@ SoilQueueRetryTest >> due: anEntry [
 	"due now by the test's clock"
 
 	^ anEntry
-		eligibleAt: clock now;
+		readyAt: clock now;
 		yourself
 ]
 
@@ -59,7 +59,7 @@ SoilQueueRetryTest >> onlyEntry [
 	txn := soil newTransaction.
 	^ [ | found |
 	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
-		found := { entry state. entry eligibleAt. entry failureRetries. entry orphanedRetries } ].
+		found := { entry state. entry readyAt. entry failureRetries. entry orphanedRetries } ].
 	  found ]
 		ensure: [ txn abort ]
 ]

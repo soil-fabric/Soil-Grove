@@ -20,7 +20,7 @@ Class {
 SoilQueueTimeOrderedKeyFormat >> appendKeyPartsFor: anEntry on: aWriteStream [
 
 	aWriteStream
-		nextPutAll: ((self millisecondsOf: anEntry eligibleAt) asByteArrayOfSize: 8);
+		nextPutAll: ((self millisecondsOf: anEntry readyAt) asByteArrayOfSize: 8);
 		nextPutAll: anEntry id
 ]
 

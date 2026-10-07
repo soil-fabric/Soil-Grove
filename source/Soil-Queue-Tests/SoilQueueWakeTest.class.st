@@ -32,7 +32,7 @@ SoilQueueWakeTest >> descriptionIn: aTransaction [
 SoilQueueWakeTest >> entryDueIn: aDuration [
 
 	^ (SoilQueueTestEntry on: 'work')
-		eligibleAt: clock now + aDuration;
+		readyAt: clock now + aDuration;
 		yourself
 ]
 
@@ -59,7 +59,7 @@ SoilQueueWakeTest >> postponingEntry [
 	"due now by the test's clock, and an hour later once it has run"
 
 	^ (SoilQueueTestPostponingEntry on: 'work' postponedBy: 1 hour)
-		eligibleAt: clock now;
+		readyAt: clock now;
 		yourself
 ]
 
@@ -125,7 +125,7 @@ SoilQueueWakeTest >> stateAndDueTimeAt: aKey [
 	txn := soil newTransaction.
 	^ [ | entry |
 	  entry := (self workspaceIn: txn) entryAt: aKey.
-	  { entry state. entry eligibleAt } ]
+	  { entry state. entry readyAt } ]
 		ensure: [ txn abort ]
 ]
 
