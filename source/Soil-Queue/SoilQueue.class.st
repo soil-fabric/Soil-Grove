@@ -451,8 +451,14 @@ SoilQueue >> prepareIn: aTransaction [
 	dispatcher sleeps until then.
 
 	A queue created on its workspace without a resident has no description to read; its
-	values were set in code, and they stay."
+	values were set in code, and they stay.
 
+	Also asks again for claims that nobody holds. A restart does not make a new instance,
+	so what was only asked once per instance would never be asked after the first start --
+	and a worker that was taken away in the stop, or whose commit failed, leaves exactly
+	such a claim behind."
+
+	recovered := false.
 	self descriptionId ifNotNil: [
 		self configureFrom: (self descriptionIn: aTransaction) in: aTransaction ].
 	((self workspaceIn: aTransaction) nextDueTimeAt: self now)
@@ -465,7 +471,7 @@ SoilQueue >> recover: aKey [
 
 	Its own transaction, so that one entry whose compensation throws does not keep the
 	others from coming back. A compensating entry that throws here stays claimed and is
-	tried again at the next pass, which is the right answer while the cleanup step has no
+	tried again at the next start, which is the right answer while the cleanup step has no
 	dead-lettering of its own.
 
 	This is the one moment the queue learns that a worker went away, so it is where that is
@@ -498,8 +504,13 @@ SoilQueue >> recoverOrphanedClaims [
 	promise of idempotence, a compensating one is cleaned up first. That is the whole
 	reason the semantics sit on the entry rather than in the queue.
 
-	Once per lifetime. Everything claimed after this is claimed by a worker of mine, and
-	#isHolding: says so."
+	Once per start, not once per instance: #prepareIn: asks again, because a restart runs
+	on the same instance. Within a start everything claimed after this is claimed by a
+	worker of mine, and #isHolding: says so -- which is also why asking again at a start is
+	safe: a worker of the run before that is still on its entry holds it.
+
+	One orphan that cannot be given back does not keep the others waiting. It is reported
+	like any failed step and stays claimed, and the next start tries it again."
 
 	| orphans |
 	recovered ifTrue: [ ^ self ].
@@ -509,7 +520,10 @@ SoilQueue >> recoverOrphanedClaims [
 		(self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
 			(entry isClaimed and: [ (self isHolding: key) not ])
 				ifTrue: [ orphans add: key ] ] ].
-	orphans do: [ :each | self recover: each ]
+	orphans do: [ :each |
+		[ self recover: each ]
+			on: Error
+			do: [ :anError | self handleStepError: anError ] ]
 ]
 
 { #category : #working }

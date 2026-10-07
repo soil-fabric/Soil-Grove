@@ -307,6 +307,68 @@ SoilQueueCrashTest >> testAnOrphanedClaimIsFoundAndGivenBack [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testAnEntryHeldByAWorkerOfTheRunBeforeIsNotTakenAwayAtAStart [
+	"asking again at a start is safe for the same reason the first ask is: a restart can come
+	while a worker of the run before is still on its entry, and that worker holds it"
+
+	| key queue txn |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	queue := self queue.
+	queue recoverOrphanedClaims.
+	txn := soil newTransaction.
+	queue assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
+	txn abort.
+	queue claim: key.
+	txn := soil newTransaction.
+	[ queue prepareIn: txn ] ensure: [ txn abort ].
+	queue recoverOrphanedClaims.
+	self assert: (self stateOf: key) equals: #claimed
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testAnOrphanThatCannotBeGivenBackDoesNotKeepTheOthers [
+	"the cleanup of the first one throws. The pass goes on to the second, and what failed is
+	reported like a failed step and stays claimed, for the next start to try again"
+
+	| failing healthy queue |
+	failing := self put: [ :target |
+		(SoilQueueTestUncompensableEntry on: target)
+			eligibleAt: DateAndTime now - 2 hours;
+			yourself ].
+	healthy := self put: [ :target |
+		(SoilQueueTestRepeatingEntry on: target)
+			eligibleAt: DateAndTime now - 1 hour;
+			yourself ].
+	self crashBeforeTheNextStepOn: failing.
+	self crashBeforeTheNextStepOn: healthy.
+	queue := self queue.
+	queue recoverOrphanedClaims.
+	self assert: (self stateOf: healthy) equals: #pending.
+	self assert: (self stateOf: failing) equals: #claimed.
+	self assert: queue stepErrorCount equals: 1.
+	self assert: queue lastStepError messageText equals: 'the cleanup cannot be done'
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testAQueueThatStartsAgainGivesBackWhatTheRunBeforeLeft [
+	"a restart runs on the same instance. The question that was asked once per instance was
+	never asked again, so a worker that was taken away in the stop left its claim behind and
+	nothing found it before the image started anew"
+
+	| key queue txn |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	queue := self queue.
+	queue recoverOrphanedClaims.
+	queue claim: key.
+	queue recoverOrphanedClaims.
+	self assert: (self stateOf: key) equals: #claimed.
+	txn := soil newTransaction.
+	[ queue prepareIn: txn ] ensure: [ txn abort ].
+	queue recoverOrphanedClaims.
+	self assert: (self retriesOf: key) equals: #( #pending 1 0 )
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testWithoutALimitAnOrphanAlwaysComesBack [
 	"no limit is the default: how many lost workers are too many is the embedder's
 	knowledge, and a number here would be a guess"
