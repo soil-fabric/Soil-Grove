@@ -15,14 +15,14 @@ the whole graph together with me.
 I carry no field for my queue. Which queue I am on follows from the queue I lie in,
 and a second source for the same fact is a duplicate that can disagree.
 
-Two of my fields end up in my key rather than only on me. #eligibleAt is the sort
+Two of my fields end up in my key rather than only on me. #readyAt is the sort
 value, and it is a lower bound and not an appointment -- I am allowed to run from then
 on, not scheduled for then, because a rate at the outlet can hold me back arbitrarily
 long. #id is what makes the key unique, which the index needs: moving a key is refused
 on an index with duplicate keys, and moving a key is what backoff does.
 
-On a grouped lane it is #groupId instead of #eligibleAt that ends up in the key: my
-group, then my place in it, then #id. #eligibleAt stays with me there and is read from
+On a grouped lane it is #groupId instead of #readyAt that ends up in the key: my
+group, then my place in it, then #id. #readyAt stays with me there and is read from
 me, so a backoff holds up my group rather than moving me to its end.
 
 My resumption semantics answer the one question an abort leaves open, and the queue
@@ -56,7 +56,7 @@ Class {
 	#instVars : [
 		'state',
 		'target',
-		'eligibleAt',
+		'readyAt',
 		'claimedAt',
 		'resumption',
 		'id',
@@ -145,21 +145,24 @@ SoilQueueEntry >> compensateIn: aTransaction [
 ]
 
 { #category : #accessing }
-SoilQueueEntry >> eligibleAt [
+SoilQueueEntry >> readyAt [
 	"the time from which I may run. A lower bound, not an appointment: a rate at the outlet
 	can hold me back arbitrarily long after it, and that is not a broken promise, because
-	no promise about a point in time was made"
+	no promise about a point in time was made.
 
-	^ eligibleAt
+	Nil until I am put into a queue unless my creator set one: the queue says 'now' then,
+	because what sorts me is the time I was put in, not the time I was made"
+
+	^ readyAt
 ]
 
 { #category : #accessing }
-SoilQueueEntry >> eligibleAt: aDateAndTime [
+SoilQueueEntry >> readyAt: aDateAndTime [
 	"whoever changes this on an entry that already lies in a queue has to move its key with
 	it, because the key is what sorts by this. A work unit of mine may change it and answer
 	#more: the queue then moves the key itself, in the same commit"
 
-	eligibleAt := aDateAndTime
+	readyAt := aDateAndTime
 ]
 
 { #category : #accessing }
@@ -213,7 +216,6 @@ SoilQueueEntry >> initialize [
 	super initialize.
 	state := #pending.
 	resumption := self class resumption.
-	eligibleAt := DateAndTime now.
 	id := self class newId.
 	orphanedRetries := 0.
 	failureRetries := 0

@@ -35,7 +35,7 @@ SoilQueueRemoveLaneTest >> deadLetterOneIn: aSymbol [
 		workspace := self workspaceIn: txn.
 		key := workspace
 			add: ((SoilQueueTestEntry on: 'work')
-				eligibleAt: clock now;
+				readyAt: clock now;
 				yourself)
 			to: (workspace laneNamed: aSymbol).
 		workspace deadLetter: key ]
@@ -94,7 +94,7 @@ SoilQueueRemoveLaneTest >> put: anInteger into: aSymbol [
 		anInteger timesRepeat: [
 			workspace
 				add: ((SoilQueueTestEntry on: 'work')
-					eligibleAt: clock now;
+					readyAt: clock now;
 					yourself)
 				to: (workspace laneNamed: aSymbol) ] ]
 ]

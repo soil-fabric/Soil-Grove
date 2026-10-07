@@ -152,7 +152,7 @@ SoilQueueGroupedLaneTest >> testAnEntryOfAGroupStaysPutWhenItsDueTimeChanges [
 		| workspace entry |
 		workspace := self workspaceIn: txn.
 		entry := workspace entryAt: key.
-		entry eligibleAt: entry eligibleAt + 1 hour.
+		entry readyAt: entry readyAt + 1 hour.
 		self assert: (workspace moveKey: key for: entry) equals: key ].
 	self assert: (self keysOfGroupsLane first asIndexKeyOfSize: 24) equals: key
 ]

@@ -220,7 +220,7 @@ SoilQueueDispatchTest >> testNoWorkerIsStartedWhenNothingIsDue [
 	| queue |
 	self put: [ :target |
 		(SoilQueueTestRepeatingEntry on: target)
-			eligibleAt: DateAndTime now + 1 hour;
+			readyAt: DateAndTime now + 1 hour;
 			yourself ].
 	queue := self queue.
 	queue runStep.

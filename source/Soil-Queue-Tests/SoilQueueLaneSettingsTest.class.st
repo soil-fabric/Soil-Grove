@@ -69,7 +69,7 @@ SoilQueueLaneSettingsTest >> put: anInteger into: aSymbol [
 		anInteger timesRepeat: [
 			workspace
 				add: ((SoilQueueTestEntry on: 'work')
-					eligibleAt: clock now;
+					readyAt: clock now;
 					yourself)
 				to: (workspace laneNamed: aSymbol) ] ]
 ]

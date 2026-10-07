@@ -63,7 +63,7 @@ SoilQueueRateTest >> putDue: anInteger [
 	self inTransaction: [ :txn |
 		anInteger timesRepeat: [
 			(self workspaceIn: txn) add: ((SoilQueueTestEntry on: 'work')
-				eligibleAt: clock now;
+				readyAt: clock now;
 				yourself) ] ]
 ]
 

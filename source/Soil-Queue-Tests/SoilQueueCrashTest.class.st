@@ -333,11 +333,11 @@ SoilQueueCrashTest >> testAnOrphanThatCannotBeGivenBackDoesNotKeepTheOthers [
 	| failing healthy queue |
 	failing := self put: [ :target |
 		(SoilQueueTestUncompensableEntry on: target)
-			eligibleAt: DateAndTime now - 2 hours;
+			readyAt: DateAndTime now - 2 hours;
 			yourself ].
 	healthy := self put: [ :target |
 		(SoilQueueTestRepeatingEntry on: target)
-			eligibleAt: DateAndTime now - 1 hour;
+			readyAt: DateAndTime now - 1 hour;
 			yourself ].
 	self crashBeforeTheNextStepOn: failing.
 	self crashBeforeTheNextStepOn: healthy.

@@ -60,7 +60,7 @@ SoilQueueLaneTest >> put: anInteger into: aWorkspaceBlock [
 	self inTransaction: [ :txn |
 		anInteger timesRepeat: [
 			(aWorkspaceBlock value: txn) add: ((SoilQueueTestEntry on: 'work')
-				eligibleAt: clock now;
+				readyAt: clock now;
 				yourself) ] ]
 ]
 

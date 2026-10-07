@@ -86,11 +86,16 @@ SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 	notification that wakes a worker belongs after that commit, not here: before it there
 	is nothing to find.
 
+	An entry that says nothing about when it may run is ready now: the time that sorts an
+	entry is the time it was put in. A queue puts in its own clock's time first, see
+	SoilQueue>>#add:in:, so this is only for whoever writes to me directly.
+
 	Answers the key in the form the index compares in, which is the form everything else
 	hands around too. #keyFor: of the lane answers the other form, the bytes it is composed
 	of."
 
 	| key |
+	anEntry readyAt ifNil: [ anEntry readyAt: DateAndTime now ].
 	key := aLaneDescription keyFor: anEntry in: self.
 	index at: key put: anEntry.
 	^ key asIndexKeyOfSize: keySize
@@ -184,12 +189,12 @@ SoilQueueWorkspace >> dueCountAt: aDateAndTime in: aLaneDescription upTo: aLimit
 	aLimit < 1 ifTrue: [ ^ count ].
 	aLaneDescription format ordersByDueTime ifFalse: [
 		self groupHeadsIn: aLaneDescription do: [ :key :entry |
-			(entry isPending and: [ entry eligibleAt <= aDateAndTime ]) ifTrue: [
+			(entry isPending and: [ entry readyAt <= aDateAndTime ]) ifTrue: [
 				count := count + 1.
 				count >= aLimit ifTrue: [ ^ count ] ] ].
 		^ count ].
 	self keysAndEntriesIn: aLaneDescription do: [ :key :entry |
-		entry eligibleAt > aDateAndTime ifTrue: [ ^ count ].
+		entry readyAt > aDateAndTime ifTrue: [ ^ count ].
 		entry isPending ifTrue: [
 			count := count + 1.
 			count >= aLimit ifTrue: [ ^ count ] ] ].
@@ -453,12 +458,12 @@ SoilQueueWorkspace >> nextGroupHeadDueAt: aDateAndTime in: aLaneDescription skip
 		((aCollection includes: key) or: [ entry isPending not ])
 			ifTrue: [ false ]
 			ifFalse: [
-				entry eligibleAt <= aDateAndTime
+				entry readyAt <= aDateAndTime
 					ifTrue: [ true ]
 					ifFalse: [
 						earliest := earliest
-							ifNil: [ entry eligibleAt ]
-							ifNotNil: [ :time | time min: entry eligibleAt ].
+							ifNil: [ entry readyAt ]
+							ifNotNil: [ :time | time min: entry readyAt ].
 						false ] ] ].
 	(aPreferredKey notNil and: [ range includesKey: aPreferredKey ]) ifTrue: [
 		(self headOfGroupOf: aPreferredKey in: aLaneDescription) ifNotNil: [ :head |
@@ -513,8 +518,8 @@ SoilQueueWorkspace >> nextOldestDueAt: aDateAndTime in: aLaneDescription skippin
 					entry isPending
 						ifFalse: [ scanKey := found + 1 ]
 						ifTrue: [
-							entry eligibleAt <= aDateAndTime ifTrue: [ ^ found ].
-							^ aBlock cull: entry eligibleAt ] ] ].
+							entry readyAt <= aDateAndTime ifTrue: [ ^ found ].
+							^ aBlock cull: entry readyAt ] ] ].
 	^ aBlock cull: nil
 ]
 

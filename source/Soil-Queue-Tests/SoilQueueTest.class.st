@@ -41,7 +41,7 @@ SoilQueueTest >> entryAt: aKey [
 SoilQueueTest >> entryDueIn: aDuration [
 
 	^ (SoilQueueTestEntry on: 'work')
-		eligibleAt: DateAndTime now + aDuration;
+		readyAt: DateAndTime now + aDuration;
 		yourself
 ]
 
@@ -217,7 +217,7 @@ SoilQueueTest >> testSomethingDueLaterAnswersWhen [
 
 	| due |
 	due := DateAndTime now + 1 hour.
-	self put: ((self entryDueIn: 0 seconds) eligibleAt: due; yourself).
+	self put: ((self entryDueIn: 0 seconds) readyAt: due; yourself).
 	self assert: self queue nextDueTime equals: due
 ]
 

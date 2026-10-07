@@ -70,7 +70,7 @@ SoilQueueGroupedDispatchTest >> put: anInteger into: aGroup dueAt: aDateAndTime 
 			workspace
 				add: ((SoilQueueTestEntry on: 'work')
 					groupId: aGroup;
-					eligibleAt: aDateAndTime;
+					readyAt: aDateAndTime;
 					yourself)
 				to: (workspace laneNamed: #groups) ] ]
 ]

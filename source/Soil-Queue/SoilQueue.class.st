@@ -85,8 +85,12 @@ SoilQueue class >> soilTransientInstVars [
 { #category : #adding }
 SoilQueue >> add: anEntry in: aTransaction [
 	"put an entry in, in the caller's transaction. Not coordinated -- two writers do not
-	get in each other's way here, because each entry gets a key of its own"
+	get in each other's way here, because each entry gets a key of its own.
 
+	An entry that says nothing about when it may run is ready now, by my clock: what sorts
+	it is the time it was put in. One that sets a time keeps it."
+
+	anEntry readyAt ifNil: [ anEntry readyAt: self now ].
 	^ (self workspaceIn: aTransaction) add: anEntry
 ]
 
@@ -242,7 +246,7 @@ SoilQueue >> book: anError for: aKey [
 			and: [ lane allowsFailureRetryOf: entry ])
 			ifTrue: [
 				entry noteFailure.
-				entry eligibleAt: self now
+				entry readyAt: self now
 					+ (entry retryDelayAfter: entry failureRetries under: lane).
 				entry releaseClaim.
 				workspace moveKey: aKey for: entry ]
@@ -750,7 +754,7 @@ SoilQueue >> workOnce: aKey [
 	"one attempt at the work unit, and what follows from what it answers, in one commit.
 
 	#more gives the claim back, and the entry stays in the ordering under the key its due
-	time now asks for. A work unit that says 'again, but later' has moved its #eligibleAt,
+	time now asks for. A work unit that says 'again, but later' has moved its #readyAt,
 	and the key is what sorts by it -- left where it was, the entry would be handed out
 	again at once. The move goes with the result into the same commit, and it never reads
 	the target: only the reference travels. An entry that did not move its due time keeps
