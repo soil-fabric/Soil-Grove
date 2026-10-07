@@ -481,18 +481,26 @@ SoilQueue >> recover: aKey [
 	This is the one moment the queue learns that a worker went away, so it is where that is
 	counted. An entry that has lost its worker as often as its lane allows is not given back
 	but parked: whatever took the worker with it would take the next one too. Compensated
-	first all the same, so that what it left behind is not left lying under a dead letter."
+	first all the same, so that what it left behind is not left lying under a dead letter.
+
+	An entry that is given back waits first, by the same curve a failed work unit waits by:
+	what took its worker away -- a commit that does not go through, a segment that is not
+	there yet -- is often gone after a short while, and without the wait the budget would be
+	used up in milliseconds. The key moves with the time, in the same commit."
 
 	self withTransactionDo: [ :txn |
-		| workspace entry |
+		| workspace entry lane |
 		workspace := self workspaceIn: txn.
 		entry := workspace entryAt: aKey.
 		entry isClaimed ifFalse: [ ^ self ].
 		entry resumption == #compensating ifTrue: [ entry compensateIn: txn ].
-		((self laneFor: aKey in: workspace) allowsOrphanedRetryOf: entry)
+		lane := self laneFor: aKey in: workspace.
+		(lane allowsOrphanedRetryOf: entry)
 			ifTrue: [
 				entry noteOrphaned.
-				entry releaseClaim ]
+				entry releaseClaim.
+				entry readyAt: self now + (entry retryDelayAfter: entry orphanedRetries under: lane).
+				workspace moveKey: aKey for: entry ]
 			ifFalse: [ workspace deadLetter: aKey ].
 		txn commit ]
 ]
@@ -625,11 +633,14 @@ SoilQueue >> runStrategyClass [
 
 { #category : #running }
 SoilQueue >> startWorkerFor: aLane [
+	"registered first, so that the place is taken from the moment the worker exists. If it
+	cannot be started, it is taken out again: its #run, which does that when a worker ends,
+	never began, and a place that nobody can give back would stay taken"
 
 	| worker |
-	worker := SoilQueueWorker on: self lane: aLane.
+	worker := self workerFor: aLane.
 	self workerStarting: worker.
-	worker start
+	[ worker start ] ifCurtailed: [ self workerFinished: worker ]
 ]
 
 { #category : #running }
@@ -663,12 +674,34 @@ SoilQueue >> startWorkersForWhatIsDue [
 			((wanted - running) min: free) timesRepeat: [ self startWorkerFor: lane ] ] ]
 ]
 
+{ #category : #working }
+SoilQueue >> stepFailed: anError on: aKey [
+	"an error got out of the step of the entry at aKey, and nobody booked it: the work unit
+	did not throw (that one is booked, see #book:for:), something around it did -- the commit,
+	a conflict that did not resolve, the bookkeeping itself. The entry still says claimed and
+	no worker holds it any more, which is exactly what a lost worker leaves behind, so it goes
+	back the same way: #recover: counts it, compensates a compensating one first, waits, and
+	parks it when the lane allows no more.
+
+	Counted as a failed step first. If giving the entry back fails as well, that is counted
+	too and the entry stays claimed: the next start finds it, see #recoverOrphanedClaims"
+
+	self handleStepError: anError.
+	[ self recover: aKey ]
+		on: Error
+		do: [ :anotherError | self handleStepError: anotherError ]
+]
+
 { #category : #stopping }
 SoilQueue >> terminateProcesses [
 	"the hard way out, after the cooperative stop ran out of time. The workers go first:
 	terminating the dispatcher leaves them running, and they are the ones holding entries"
 
 	self workers do: [ :each | each terminate ].
+	"nobody is left to take a place back. A worker that was terminated before its #run
+	began never reaches the end of it, and would be counted for ever -- with a pool of one
+	place that is no worker at all, and a queue that never says it is quiet"
+	mutex critical: [ workers := IdentitySet new ].
 	super terminateProcesses
 ]
 
@@ -732,6 +765,13 @@ SoilQueue >> workerFinished: aWorker [
 	it: the queue stops handing out and the workers run dry"
 
 	mutex critical: [ workers remove: aWorker ifAbsent: [ nil ] ]
+]
+
+{ #category : #running }
+SoilQueue >> workerFor: aLane [
+	"a worker that takes its entries from aLane, not started yet"
+
+	^ SoilQueueWorker on: self lane: aLane
 ]
 
 { #category : #accessing }
