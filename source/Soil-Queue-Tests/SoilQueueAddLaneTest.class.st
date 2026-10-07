@@ -173,6 +173,57 @@ SoilQueueAddLaneTest >> testAnAddedLaneRunsLikeTheDefaultLane [
 ]
 
 { #category : #tests }
+SoilQueueAddLaneTest >> testAnEntryPutInThroughTheQueueGoesToTheFirstLane [
+	"the way an embedder puts work in: the queue, in the caller's transaction, and the
+	worker of the first lane finds it"
+
+	| queue |
+	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
+	queue := self queue.
+	queue addLane: #b format: self format.
+	self inTransaction: [ :txn |
+		queue add: (SoilQueueTestEntry on: 'work') in: txn ].
+	self assert: self left equals: 1.
+
+	(SoilQueueWorker on: queue lane: (queue lane: #b)) run.
+	self assert: self left equals: 1.
+	(SoilQueueWorker on: queue) run.
+	self assert: self left equals: 0
+]
+
+{ #category : #tests }
+SoilQueueAddLaneTest >> testAnEntryPutIntoALaneIsWorkedByThatLane [
+
+	| queue |
+	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
+	queue := self queue.
+	queue addLane: #b format: self format.
+	self inTransaction: [ :txn |
+		queue add: (SoilQueueTestEntry on: 'work') to: #b in: txn ].
+	self assert: self left equals: 1.
+
+	(SoilQueueWorker on: queue) run.
+	self assert: self left equals: 1.
+	(SoilQueueWorker on: queue lane: (queue lane: #b)) run.
+	self assert: self left equals: 0
+]
+
+{ #category : #tests }
+SoilQueueAddLaneTest >> testNoEntryIsPutIntoALaneThatIsNotThere [
+	"an entry under a prefix that no lane owns would be found by nobody -- and by the next
+	lane that is given the prefix"
+
+	| queue |
+	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
+	queue := self queue.
+	self
+		should: [ self inTransaction: [ :txn |
+			queue add: (SoilQueueTestEntry on: 'work') to: #nowhere in: txn ] ]
+		raise: Error.
+	self assert: self left equals: 0
+]
+
+{ #category : #tests }
 SoilQueueAddLaneTest >> testAPrefixSpaceRunsFull [
 	"one byte of marker is room for 256 lanes, #default included"
 
