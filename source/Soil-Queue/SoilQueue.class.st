@@ -88,10 +88,30 @@ SoilQueue >> add: anEntry in: aTransaction [
 	get in each other's way here, because each entry gets a key of its own.
 
 	An entry that says nothing about when it may run is ready now, by my clock: what sorts
-	it is the time it was put in. One that sets a time keeps it."
+	it is the time it was put in. One that sets a time keeps it.
 
+	Into my first lane. Whoever has more than one says which, see #add:to:in:. The
+	notification that wakes a worker is the caller's, after the commit: before it there is
+	nothing to find."
+
+	^ self
+		add: anEntry
+		to: (self workspaceIn: aTransaction) defaultLane name
+		in: aTransaction
+]
+
+{ #category : #adding }
+SoilQueue >> add: anEntry to: aLaneName in: aTransaction [
+	"put an entry into the lane of that name, in the caller's transaction. A name that is
+	no lane of mine is refused before anything is written: an entry under a prefix that
+	no lane owns would be found by nobody, and by the next lane that is given the prefix.
+
+	The answer is the key, in the form the index compares in."
+
+	| workspace |
+	workspace := self workspaceIn: aTransaction.
 	anEntry readyAt ifNil: [ anEntry readyAt: self now ].
-	^ (self workspaceIn: aTransaction) add: anEntry
+	^ workspace add: anEntry to: (workspace laneNamed: aLaneName)
 ]
 
 { #category : #lanes }
