@@ -633,11 +633,14 @@ SoilQueue >> runStrategyClass [
 
 { #category : #running }
 SoilQueue >> startWorkerFor: aLane [
+	"registered first, so that the place is taken from the moment the worker exists. If it
+	cannot be started, it is taken out again: its #run, which does that when a worker ends,
+	never began, and a place that nobody can give back would stay taken"
 
 	| worker |
-	worker := SoilQueueWorker on: self lane: aLane.
+	worker := self workerFor: aLane.
 	self workerStarting: worker.
-	worker start
+	[ worker start ] ifCurtailed: [ self workerFinished: worker ]
 ]
 
 { #category : #running }
@@ -695,6 +698,10 @@ SoilQueue >> terminateProcesses [
 	terminating the dispatcher leaves them running, and they are the ones holding entries"
 
 	self workers do: [ :each | each terminate ].
+	"nobody is left to take a place back. A worker that was terminated before its #run
+	began never reaches the end of it, and would be counted for ever -- with a pool of one
+	place that is no worker at all, and a queue that never says it is quiet"
+	mutex critical: [ workers := IdentitySet new ].
 	super terminateProcesses
 ]
 
@@ -758,6 +765,13 @@ SoilQueue >> workerFinished: aWorker [
 	it: the queue stops handing out and the workers run dry"
 
 	mutex critical: [ workers remove: aWorker ifAbsent: [ nil ] ]
+]
+
+{ #category : #running }
+SoilQueue >> workerFor: aLane [
+	"a worker that takes its entries from aLane, not started yet"
+
+	^ SoilQueueWorker on: self lane: aLane
 ]
 
 { #category : #accessing }

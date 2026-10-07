@@ -140,6 +140,40 @@ SoilQueueWorkerPoolTest >> testAWorkerThatEndedGivesItsPlaceBack [
 ]
 
 { #category : #tests }
+SoilQueueWorkerPoolTest >> testAPlaceIsNotKeptForAWorkerThatCouldNotBeStarted [
+	"it is registered before it is started, so that the place is taken from the moment it
+	exists. When starting it fails, its #run never began and cannot give the place back, so
+	the queue does"
+
+	| queue |
+	queue := SoilQueueTestUnstartableQueue from: self queue.
+	(queue pool: #default) size: 1.
+	self should: [ queue startWorkerFor: (queue lane: #a) ] raise: Error.
+	self assert: queue workers equals: #(  ).
+	self assert: (queue freePlacesIn: (queue pool: #default)) equals: 1
+]
+
+{ #category : #tests }
+SoilQueueWorkerPoolTest >> testAWorkerThatNeverRanGivesItsPlaceBackWhenTheProcessesAreTerminated [
+	"a worker that was terminated before its #run began never reaches the end of it, which is
+	where a worker takes itself out. With a pool of one place that would be no worker at all
+	for ever, and a queue that never says it is quiet"
+
+	| queue |
+	self put: 1 into: #a.
+	queue := self queue.
+	(queue pool: #default) size: 1.
+	queue runStep.
+	self assert: queue started size equals: 1.
+	self assert: (queue freePlacesIn: (queue pool: #default)) equals: 0.
+	self deny: queue basicIsIdle.
+	queue terminateProcesses.
+	self assert: queue workers equals: #(  ).
+	self assert: (queue freePlacesIn: (queue pool: #default)) equals: 1.
+	self assert: queue basicIsIdle
+]
+
+{ #category : #tests }
 SoilQueueWorkerPoolTest >> testByDefaultAllLanesShareOnePool [
 	"one pool for all lanes, the size of the description's worker limit -- the upper bound
 	of the whole queue"
