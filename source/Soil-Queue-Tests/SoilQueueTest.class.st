@@ -65,13 +65,14 @@ SoilQueueTest >> put: anEntry [
 
 { #category : #helpers }
 SoilQueueTest >> queue [
-	"a live queue on the description, the way a supervisor would build one. It gets a
-	supervisor but is never started: that is the standalone case, and it is the one where
-	a work unit can be driven a step at a time"
+	"a live queue on the description, the way a supervisor would build one, with its lanes
+	built the way a start builds them. It gets a supervisor but is never started: that is
+	the standalone case, and it is the one where a work unit can be driven a step at a time"
 
 	| txn |
 	txn := soil newTransaction.
 	^ [ ((self descriptionIn: txn) newInstanceIn: txn)
+		configureFrom: (self descriptionIn: txn) in: txn;
 		supervisor: soil newResidentSupervisor;
 		yourself ]
 		ensure: [ txn abort ]
