@@ -70,6 +70,7 @@ SoilQueueDispatchTest >> queue [
 	txn := soil newTransaction.
 	^ [ | queue |
 	  queue := ((self descriptionIn: txn) newInstanceIn: txn)
+		configureFrom: (self descriptionIn: txn) in: txn;
 		supervisor: soil newResidentSupervisor;
 		yourself.
 	  queues add: queue.

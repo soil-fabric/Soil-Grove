@@ -138,12 +138,13 @@ SoilQueueCrashTest >> put: aBlock [
 
 { #category : #helpers }
 SoilQueueCrashTest >> queue [
-	"a fresh live queue on the same description -- what comes back after a restart, with
-	nothing in flight and no memory of what was out"
+	"a fresh live queue on the same description, configured as a start configures it --
+	what comes back after a restart, with nothing in flight and no memory of what was out"
 
 	| txn |
 	txn := soil newTransaction.
 	^ [ ((self descriptionIn: txn) newInstanceIn: txn)
+		configureFrom: (self descriptionIn: txn) in: txn;
 		supervisor: soil newResidentSupervisor;
 		yourself ]
 		ensure: [ txn abort ]

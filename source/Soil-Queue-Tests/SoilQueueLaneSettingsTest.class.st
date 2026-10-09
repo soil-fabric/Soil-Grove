@@ -76,11 +76,13 @@ SoilQueueLaneSettingsTest >> put: anInteger into: aSymbol [
 
 { #category : #helpers }
 SoilQueueLaneSettingsTest >> queue [
-	"a live queue made by its description, the way a supervisor would make one"
+	"a live queue made by its description, the way a supervisor would make one, and
+	configured the way a start configures it"
 
 	| txn |
 	txn := soil newTransaction.
 	^ [ ((self descriptionIn: txn) newInstanceIn: txn)
+		configureFrom: (self descriptionIn: txn) in: txn;
 		supervisor: soil newResidentSupervisor;
 		clock: clock;
 		yourself ]

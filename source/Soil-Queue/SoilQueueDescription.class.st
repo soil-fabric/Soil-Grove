@@ -1,13 +1,13 @@
 "
-What makes a queue a resident: I create it when the database opens, configure it, and
-let the resident machinery start it. The queue itself works on its workspace, a
+What makes a queue a resident: I create it when the database opens and let the resident
+machinery start it, and the start configures it. The queue itself works on its workspace, a
 SoilQueueWorkspace, and runs the same with or without me around it.
 
 I hold that workspace and the configuration -- how many workers, the rate, the retry
 budgets and the backoff. None of that shapes a key; what does, the index and the format,
 belongs to the workspace, because whoever opens it without me still has to find the
-entries. I am read to create and configure the queue at every start, and only then: my
-values go to its lanes, which hold them until the next start. The queue reaches its
+entries. I am read to configure the queue at every start, and only then: my values go to
+its lanes, which hold them until the next start. The queue reaches its
 workspace by id.
 
 Every value is set for all lanes, and may be set for one lane in particular, by the
@@ -169,12 +169,12 @@ SoilQueueDescription >> name [
 { #category : #'instance creation' }
 SoilQueueDescription >> newInstanceIn: aTransaction [
 	"the name goes along, so the live queue can answer for itself what it is called
-	without opening a transaction for a label. So does the configuration: the queue builds
-	its lanes from my workspace and my values right here, and again at every start"
+	without opening a transaction for a label. The configuration does not: the queue builds
+	its lanes from my workspace and my values when it starts, and a queue that is loaded
+	and never started -- switched off -- has nothing to build them for"
 
 	^ (super newInstanceIn: aTransaction)
 		name: name;
-		configureFrom: self in: aTransaction;
 		yourself
 ]
 

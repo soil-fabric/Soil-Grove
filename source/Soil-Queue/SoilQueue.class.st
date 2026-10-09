@@ -9,8 +9,9 @@ is mine.
 
 Being live as long as the database is open, carrying runtime state, and having a
 persisted description is precisely what a resident is, so I am one. Nothing about that
-forces a supervisor on anyone: created and not started, I still hand out entries, and
-without a supervisor there are no competing workers for the mutex to arbitrate.
+forces a supervisor on anyone: created on my workspace (#onWorkspace:in:) and never
+started, I still hand out entries, and without a supervisor there are no competing workers
+for the mutex to arbitrate.
 
 Mine is what competing workers meet at, and all of it lives in memory only: the mutex,
 the set of keys that are out, the workers that are running, the wake time and my live
@@ -21,10 +22,11 @@ own.
 
 I hand out per lane. A lane is a place entries go out from with a pace of its own; its
 stored half lies in my workspace, its live half -- the rate, the retry budget, the
-backoff, the count of what went out -- is a SoilQueueLane I build when I am created and
-again at every start. After that I read no configuration: a changed setting holds from the
-next start on. Without a resident, whoever creates me on a workspace (#onWorkspace:in:)
-sets the values on the lanes in code.
+backoff, the count of what went out -- is a SoilQueueLane I build at every start, and only
+then: a changed setting holds from the next start on. Made by my description and not
+started yet -- loaded but switched off, say -- I have no live lanes, and whoever asks for
+one hears that I am not started. Without a resident, whoever creates me on a workspace
+(#onWorkspace:in:) gets the lanes built right there and sets their values in code.
 
 Every lane draws its workers from a worker pool, a count of places; lanes may share one,
 and by default all of them do. Before I start a worker for a lane there has to be a place
@@ -119,12 +121,16 @@ SoilQueue >> addLane: aSymbol format: aFormat [
 	"a lane more, stored in my workspace under the next free marker and handed out from at
 	once -- a lane that took entries and handed nothing out until the next start would only
 	collect them. Until that start configures it, it runs like my default lane and draws
-	on its pool. Answers the live lane"
+	on its pool. Answers the live lane.
+
+	Not started, I have no live lanes to add it to, and I hand nothing out anyway: the lane
+	is only stored, the next start builds it with the others, and I answer nil"
 
 	| lane |
 	self withTransactionDo: [ :txn |
 		(self workspaceIn: txn) addLaneNamed: aSymbol format: aFormat.
 		txn commit ].
+	self hasLiveLanes ifFalse: [ ^ nil ].
 	lane := (SoilQueueLane named: aSymbol configuredFrom: self defaultLane)
 		pool: self defaultLane pool;
 		yourself.
@@ -302,8 +308,9 @@ SoilQueue >> clock: aClock [
 SoilQueue >> configureFrom: aDescription in: aTransaction [
 	"build my lanes from the lanes stored in my workspace, each configured from
 	aDescription -- the values for all lanes first, then its own -- and drawing on the
-	worker pool named for it. Lanes named for one pool share one. Called when I am created
-	and at every start, and only then: after that nobody reads the configuration for me.
+	worker pool named for it. Lanes named for one pool share one. Called at every start, and
+	only then: after that nobody reads the configuration for me. A queue without a resident
+	is configured once, where it is created on its workspace.
 
 	The lanes are built anew, and with them their count of what went out lately -- a
 	restart that forgets it lets at most one period's worth out early"
@@ -335,7 +342,7 @@ SoilQueue >> conflictLimit [
 SoilQueue >> defaultLane [
 	"my first lane -- the only one until I have more"
 
-	^ lanes first
+	^ self liveLanes first
 ]
 
 { #category : #waking }
@@ -353,6 +360,14 @@ SoilQueue >> freePlacesIn: aWorkerPool [
 
 	^ aWorkerPool size - (mutex critical: [
 		workers count: [ :each | each lane pool name = aWorkerPool name ] ])
+]
+
+{ #category : #testing }
+SoilQueue >> hasLiveLanes [
+	"whether my lanes are built. A start builds them, and so does creating me on a
+	workspace; a queue made by its description has none until it is started"
+
+	^ lanes notEmpty
 ]
 
 { #category : #initialization }
@@ -378,7 +393,7 @@ SoilQueue >> isHolding: aKey [
 SoilQueue >> lane: aSymbol [
 	"the live lane of that name, for whoever sets its values in code"
 
-	^ lanes
+	^ self liveLanes
 		detect: [ :each | each name = aSymbol ]
 		ifNone: [ self error: 'no lane named ', aSymbol printString ]
 ]
@@ -393,6 +408,16 @@ SoilQueue >> laneFor: aKey in: aQueueWorkspace [
 { #category : #accessing }
 SoilQueue >> lanes [
 
+	^ lanes
+]
+
+{ #category : #accessing }
+SoilQueue >> liveLanes [
+	"my lanes, for a question about one of them. Not started, I have none, and that is a
+	different answer than a lane that is not there: the lane may well be in my workspace,
+	waiting for the start that builds it"
+
+	self hasLiveLanes ifFalse: [ ^ self error: 'the queue ' , name printString , ' is not started' ].
 	^ lanes
 ]
 
@@ -466,7 +491,7 @@ SoilQueue >> pools [
 SoilQueue >> prepareIn: aTransaction [
 	"read my configuration, then give the push at opening. A start is 'read the
 	configuration, then run', for a restart as much as for the first one, so this is where
-	my lanes are built again from the workspace and the description.
+	my lanes are built from the workspace and the description.
 
 	Work that was left lying around has to be found without anyone signalling for it: the
 	signal that would have said so came before the restart and is gone with it. This only
@@ -612,9 +637,16 @@ SoilQueue >> removeLane: aSymbol discardingEntries: aBoolean [
 	Out of what I hand out from first, under the mutex that handing out goes under, so that
 	nothing of it goes out from then on. If my workspace refuses -- entries left and aBoolean
 	false -- the lane comes back. The default lane stays: entries that name no lane go there,
-	and a lane added at runtime runs like it"
+	and a lane added at runtime runs like it.
+
+	Not started, I hand nothing out and have no live lane to take out: only my workspace
+	gives it up, and it refuses the same things"
 
 	| lane |
+	self hasLiveLanes ifFalse: [
+		^ self withTransactionDo: [ :txn |
+			(self workspaceIn: txn) removeLaneNamed: aSymbol discardingEntries: aBoolean.
+			txn commit ] ].
 	lane := self lane: aSymbol.
 	lane == self defaultLane ifTrue: [ ^ self error: 'the default lane cannot be removed' ].
 	mutex critical: [

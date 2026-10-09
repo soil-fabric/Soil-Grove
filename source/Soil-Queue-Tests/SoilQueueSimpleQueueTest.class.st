@@ -57,6 +57,7 @@ SoilQueueSimpleQueueTest >> queue [
 	| txn |
 	txn := soil newTransaction.
 	^ [ ((self descriptionIn: txn) newInstanceIn: txn)
+		configureFrom: (self descriptionIn: txn) in: txn;
 		supervisor: soil newResidentSupervisor;
 		clock: clock;
 		yourself ]

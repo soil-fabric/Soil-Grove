@@ -1,8 +1,9 @@
 "
 A lane holds its values; nobody reads the configuration for it once the queue runs.
 
-With a resident, the values come from the description when the queue is created and at
-every start -- a setting changed on the description is configuration for the next start.
+With a resident, the values come from the description at every start, and only then -- a
+setting changed on the description is configuration for the next start. Before its first
+start the queue has no live lanes at all.
 Without one, the queue is created on its workspace and whoever does that sets the values
 on the lane in code.
 
@@ -66,11 +67,13 @@ SoilQueueLaneTest >> put: anInteger into: aWorkspaceBlock [
 
 { #category : #helpers }
 SoilQueueLaneTest >> residentQueue [
-	"a live queue made by its description, the way a supervisor would make one"
+	"a live queue made by its description, the way a supervisor would make one, and
+	configured the way a start configures it"
 
 	| txn |
 	txn := soil newTransaction.
 	^ [ ((self descriptionIn: txn) newInstanceIn: txn)
+		configureFrom: (self descriptionIn: txn) in: txn;
 		supervisor: soil newResidentSupervisor;
 		clock: clock;
 		yourself ]
@@ -89,6 +92,19 @@ SoilQueueLaneTest >> setUp [
 		initializeRoot
 ]
 
+{ #category : #helpers }
+SoilQueueLaneTest >> stop: aQueue [
+	"a started queue has a dispatcher, and it has to be out of its loop before the database
+	goes away. A test that waits for ever is worse than one that fails"
+
+	| deadline |
+	aQueue requestStop.
+	deadline := DateAndTime now + 5 seconds.
+	[ aQueue hasRunningProcess ] whileTrue: [
+		DateAndTime now > deadline ifTrue: [ ^ self fail: 'the queue did not stop' ].
+		10 milliSeconds asDelay wait ]
+]
+
 { #category : #running }
 SoilQueueLaneTest >> tearDown [
 
@@ -98,7 +114,7 @@ SoilQueueLaneTest >> tearDown [
 
 { #category : #tests }
 SoilQueueLaneTest >> testAChangedRateHoldsFromTheNextStart [
-	"the lane took its values when the queue was made. A rate written on the description
+	"the lane took its values when the queue was configured. A rate written on the description
 	afterwards is the configuration of the next start -- a restart of the resident is how it
 	takes effect, the way it is for every resident"
 
@@ -122,6 +138,57 @@ SoilQueueLaneTest >> testAChangedRateHoldsFromTheNextStart [
 ]
 
 { #category : #tests }
+SoilQueueLaneTest >> testADisabledQueueTakesALaneAndHasItOnceItIsEnabled [
+	"switched off, the queue is loaded and never started, so it has no live lanes to add
+	one to. The lane is stored all the same, and the start that switches the queue on
+	builds it with the others"
+
+	| queue txn |
+	soil addResidentDescription: (SoilQueueDescription
+		named: #work
+		workspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1)).
+	self inTransaction: [ :t | (self descriptionIn: t) disable ].
+	txn := soil newTransaction.
+	[ queue := ((self descriptionIn: txn) newInstanceIn: txn)
+		supervisor: soil newResidentSupervisor;
+		clock: clock;
+		yourself.
+	  queue restartIn: txn ] ensure: [ txn abort ].
+	self assert: queue isDisabled.
+
+	self assert: (queue addLane: #b format: SoilQueueTimeOrderedKeyFormat new) isNil.
+	self assert: queue lanes isEmpty.
+
+	self inTransaction: [ :t | (self descriptionIn: t) enable ].
+	txn := soil newTransaction.
+	[ [ queue restartIn: txn ] ensure: [ txn abort ].
+	  self assert: queue isStarted.
+	  self assert: (queue lane: #b) name equals: #b ]
+		ensure: [ self stop: queue ]
+]
+
+{ #category : #tests }
+SoilQueueLaneTest >> testADisabledQueueGivesALaneUp [
+	"made by its description and not started, the queue has no live lane to take out; its
+	workspace gives the lane up all the same"
+
+	| workspace queue txn |
+	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1.
+	workspace addLaneNamed: #b format: SoilQueueTimeOrderedKeyFormat new.
+	soil addResidentDescription: (SoilQueueDescription named: #work workspace: workspace).
+	txn := soil newTransaction.
+	[ queue := ((self descriptionIn: txn) newInstanceIn: txn)
+		supervisor: soil newResidentSupervisor;
+		yourself ] ensure: [ txn abort ].
+
+	queue removeLane: #b.
+	txn := soil newTransaction.
+	[ self
+		assert: ((self descriptionIn: txn) workspace lanes collect: [ :each | each name ])
+		equals: #( #default ) ] ensure: [ txn abort ]
+]
+
+{ #category : #tests }
 SoilQueueLaneTest >> testAQueueRunsOnItsWorkspaceWithoutAResident [
 	"load the workspace, create a queue on it, and it works -- no description, no registry,
 	nothing that has to be started"
@@ -142,6 +209,32 @@ SoilQueueLaneTest >> testAQueueRunsOnItsWorkspaceWithoutAResident [
 	self put: 3 into: workspace.
 	(SoilQueueWorker on: queue) run.
 	self assert: (self left: workspace) equals: 0
+]
+
+{ #category : #tests }
+SoilQueueLaneTest >> testAQueueThatIsNotStartedSaysSo [
+	"made by its description and not started, the queue has no live lanes yet. Asked for
+	one, it says that it is not started -- 'no lane named' would be wrong, the lane is in
+	its workspace"
+
+	| queue txn |
+	soil addResidentDescription: (SoilQueueDescription
+		named: #work
+		timeOrderedWithBackend: SoilSkipList
+		keySize: 24).
+	txn := soil newTransaction.
+	[ queue := ((self descriptionIn: txn) newInstanceIn: txn)
+		supervisor: soil newResidentSupervisor;
+		yourself ] ensure: [ txn abort ].
+
+	self
+		should: [ queue lane: #default ]
+		raise: Error
+		withExceptionDo: [ :error | self assert: (error messageText includesSubstring: 'not started') ].
+	self
+		should: [ queue defaultLane ]
+		raise: Error
+		withExceptionDo: [ :error | self assert: (error messageText includesSubstring: 'not started') ]
 ]
 
 { #category : #tests }
