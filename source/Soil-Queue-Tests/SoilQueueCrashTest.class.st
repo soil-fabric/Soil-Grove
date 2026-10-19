@@ -403,6 +403,22 @@ SoilQueueCrashTest >> testAQueueThatStartsAgainGivesBackWhatTheRunBeforeLeft [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testAStartFindsWorkWhenAllThatIsLeftIsAnOrphan [
+	"an orphaned claim is not due -- only pending entries are. A start that asked the
+	ordering first found nothing, raised no flag, and the claim waited for whatever signal
+	came next"
+
+	| key queue txn |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self crashBeforeTheNextStepOn: key.
+	queue := self queue.
+	self deny: queue hasPendingWork.
+	txn := soil newTransaction.
+	[ queue prepareIn: txn ] ensure: [ txn abort ].
+	self assert: queue hasPendingWork
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testWithoutALimitAnOrphanAlwaysComesBack [
 	"no limit is the default: how many lost workers are too many is the embedder's
 	knowledge, and a number here would be a guess"

@@ -494,10 +494,11 @@ SoilQueue >> prepareIn: aTransaction [
 	my lanes are built from the workspace and the description.
 
 	Work that was left lying around has to be found without anyone signalling for it: the
-	signal that would have said so came before the restart and is gone with it. This only
-	raises the flag; the first work unit does the rest. An entry that is not due yet raises
-	it too: the step that finds nothing due is the one that reads when it will be, and the
-	dispatcher sleeps until then.
+	signal that would have said so came before the restart and is gone with it. So every
+	start raises the flag, whatever the workspace holds, and the first step does the rest:
+	it gives back the claims the run before left, starts what is due and reads when the
+	next entry will be. Asking the workspace first would not do -- it only knows about
+	pending entries, and an orphaned claim alone would wait for the next signal.
 
 	A queue created on its workspace without a resident has no description to read; its
 	values were set in code, and they stay.
@@ -510,8 +511,7 @@ SoilQueue >> prepareIn: aTransaction [
 	recovered := false.
 	self descriptionId ifNotNil: [
 		self configureFrom: (self descriptionIn: aTransaction) in: aTransaction ].
-	((self workspaceIn: aTransaction) nextDueTimeAt: self now)
-		ifNotNil: [ self noteWork ]
+	self noteWork
 ]
 
 { #category : #recovery }

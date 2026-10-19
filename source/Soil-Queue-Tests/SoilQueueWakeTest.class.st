@@ -130,6 +130,20 @@ SoilQueueWakeTest >> stateAndDueTimeAt: aKey [
 		ensure: [ txn abort ]
 ]
 
+{ #category : #helpers }
+SoilQueueWakeTest >> statesAndOrphanedRetries [
+	"each entry as its state and how often it lost its worker, read inside the transaction
+	for the reason #stateAndDueTimeAt: gives"
+
+	| txn found |
+	txn := soil newTransaction.
+	found := OrderedCollection new.
+	[ (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
+		found add: { entry state. entry orphanedRetries } ] ]
+		ensure: [ txn abort ].
+	^ found asArray
+]
+
 { #category : #running }
 SoilQueueWakeTest >> tearDown [
 	"a sleeping dispatcher has to be out of its loop before the database goes away"
@@ -181,6 +195,20 @@ SoilQueueWakeTest >> testASleepingDispatcherStopsWhenAsked [
 	queue requestStop.
 	self waitUntil: [ queue hasRunningProcess not ].
 	self assert: queue isStopped
+]
+
+{ #category : #tests }
+SoilQueueWakeTest >> testAStartedQueueGivesBackAnOrphanWithNothingElseToDo [
+	"nothing is due and nothing signals: the claim the run before left is not pending, and
+	the ordering does not count it. Only the first step of a start finds it. Given back, it
+	waits by the curve of its lane, and the test's clock stands still, so it stays where the
+	step put it"
+
+	| queue |
+	self queue claim: (self put: (self entryDueIn: 0 seconds)).
+	queue := self queue.
+	self start: queue.
+	self waitUntil: [ self statesAndOrphanedRetries = #( #( #pending 1 ) ) ]
 ]
 
 { #category : #tests }
