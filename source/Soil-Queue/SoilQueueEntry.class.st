@@ -42,6 +42,17 @@ called retriable -- a far side that answered 503; that one counts against the wo
 Neither is a count of attempts: a claim is taken for every attempt, the first one
 included, and counting there would make every failure look like a lost worker too.
 
+Both count in a row: a step of mine that goes through sets them back to nothing. What
+they are read for -- the wait before the next try, and the limit of my lane -- is about
+one step that keeps failing, not about how long I have been around. Counted over my whole
+life, an entry that lives through many steps -- a flow instance -- would carry every
+deploy it ever saw into the wait before its next step.
+
+I say myself that a step went through (#noteStepDone); the queue cannot tell. #more is the
+answer of a unit that only put itself off as well -- a throttle that asked to wait, a
+switched-off target looked at again -- and setting the counts back for one of those would
+keep an entry whose step never goes through from ever reaching its limit.
+
 Waiting is courtesy, not a guarantee. A maintenance run can let entries finish; a crash
 cannot. Waiting lowers the number of repetitions -- the correctness is in the three
 semantics above and nowhere else.
@@ -167,9 +178,10 @@ SoilQueueEntry >> readyAt: aDateAndTime [
 
 { #category : #accessing }
 SoilQueueEntry >> failureRetries [
-	"how often my work unit failed with an error my subclass called retriable and was run
-	again. What counts against the work: a far side that failed, a configuration that does
-	not hold -- never a worker that went away"
+	"how often in a row my work unit failed with an error my subclass called retriable and
+	was run again, since my last step that went through. What counts against the work: a
+	far side that failed, a configuration that does not hold -- never a worker that went
+	away"
 
 	^ failureRetries
 ]
@@ -303,11 +315,25 @@ SoilQueueEntry >> noteOrphaned [
 ]
 
 { #category : #accessing }
+SoilQueueEntry >> noteStepDone [
+	"a step of mine went through. That ends a row: both counts are of repetitions in a row,
+	so the next one waits from the start of the curve again, and my lane's limit starts
+	over.
+
+	Called from my #performIn:, so it is written with the step and goes with it when the
+	commit does not go through. A unit that only put itself off does not call it. One that
+	forgets to counts over its whole life -- it is parked sooner, never later"
+
+	orphanedRetries := 0.
+	failureRetries := 0
+]
+
+{ #category : #accessing }
 SoilQueueEntry >> orphanedRetries [
-	"how often I was found claimed with no worker holding me and was given back: the image
-	went away, a deploy, a rolling release. Nobody's fault and no cost, which is why it is
-	kept apart from #failureRetries -- a deploy must not use up the budget of a far side
-	that is failing"
+	"how often in a row I was found claimed with no worker holding me and was given back,
+	since my last step that went through: the image went away, a deploy, a rolling release.
+	Nobody's fault and no cost, which is why it is kept apart from #failureRetries -- a
+	deploy must not use up the budget of a far side that is failing"
 
 	^ orphanedRetries
 ]
@@ -321,7 +347,10 @@ SoilQueueEntry >> performIn: aTransaction [
 
 	Work and the question 'does it go on?' are one call rather than two because the answer
 	is a property of the step that just ran. Keeping it between two calls would need a
-	field that has no other reason to exist."
+	field that has no other reason to exist.
+
+	A step that went through says so with #noteStepDone before it answers; a unit that only
+	put itself off answers #more without it."
 
 	^ self subclassResponsibility
 ]

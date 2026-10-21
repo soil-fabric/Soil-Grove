@@ -91,6 +91,20 @@ SoilQueueEntryTest >> testAPlainTargetIsMaterializedWithMe [
 ]
 
 { #category : #tests }
+SoilQueueEntryTest >> testAStepThatGoesThroughSetsBothCountsBack [
+	"they count repetitions in a row, and a step that went through ends the row"
+
+	| entry |
+	entry := SoilQueueTestEntry on: 'work'.
+	entry
+		noteOrphaned;
+		noteFailure;
+		noteStepDone.
+	self assert: entry orphanedRetries equals: 0.
+	self assert: entry failureRetries equals: 0
+]
+
+{ #category : #tests }
 SoilQueueEntryTest >> testAnEntryStartsPendingAndUnclaimed [
 
 	| entry |

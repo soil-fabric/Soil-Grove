@@ -4,7 +4,9 @@ The first resumption semantics: work that comes in steps and picks up where it l
 I do one step per work unit -- the effect on my target first, then the note that it
 happened, and the note is my #progress. That order is the rule for external effects: a
 crash between the two costs one repeated effect, the other order loses one altogether,
-and the queue promises at least once rather than exactly once.
+and the queue promises at least once rather than exactly once. After the note I say that
+the step went through (#noteStepDone), which ends a row of retries; the queue cannot tell
+that from my answer.
 
 My target counts the steps it owes in the size of its effects; how many it owes comes
 from #stepsOwed.
@@ -47,6 +49,7 @@ SoilQueueTestContinuingEntry >> performIn: aTransaction [
 	step := self progress + 1.
 	self target addEffect: step.
 	self progress: step.
+	self noteStepDone.
 	^ step < stepsOwed
 		ifTrue: [ #more ]
 		ifFalse: [ #finished ]

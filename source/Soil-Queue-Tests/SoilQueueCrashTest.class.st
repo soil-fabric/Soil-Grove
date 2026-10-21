@@ -59,7 +59,7 @@ SoilQueueCrashTest >> currentKeyOf: aKey [
 
 { #category : #helpers }
 SoilQueueCrashTest >> deadLetters [
-	"each parked entry as its id, its state and how often it lost its worker"
+	"each parked entry as its id, its state and how often in a row it was given back before"
 
 	| txn letters |
 	txn := soil newTransaction.
@@ -416,6 +416,41 @@ SoilQueueCrashTest >> testAStartFindsWorkWhenAllThatIsLeftIsAnOrphan [
 	txn := soil newTransaction.
 	[ queue prepareIn: txn ] ensure: [ txn abort ].
 	self assert: queue hasPendingWork
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testAStepThatGoesThroughEndsTheRowOfLostWorkers [
+	"a continuing entry lives through many steps, and a deploy can come during any of them.
+	What the count is read for -- the wait and the limit -- is about one step that keeps
+	losing its worker, so a step that goes through starts it again"
+
+	| key |
+	key := self put: [ :target | SoilQueueTestContinuingEntry on: target steps: 3 ].
+	2 timesRepeat: [
+		self crashBeforeTheNextStepOn: key.
+		self queue recoverOrphanedClaims ].
+	self assert: (self retriesOf: key) equals: #( #pending 2 0 ).
+
+	self workOneUnit.
+	self assert: (self retriesOf: key) equals: #( #pending 0 0 )
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testTheLimitIsForLostWorkersInARow [
+	"counted over the entry's life, the limit would park a healthy flow after enough
+	deploys. Counted in a row, it parks only an entry whose step never goes through"
+
+	| key |
+	self orphanedRetryLimit: 2.
+	key := self put: [ :target | SoilQueueTestContinuingEntry on: target steps: 3 ].
+	2 timesRepeat: [
+		2 timesRepeat: [
+			self crashBeforeTheNextStepOn: key.
+			self queue recoverOrphanedClaims.
+			self assert: self deadLetters isEmpty ].
+		self workOneUnit ].
+
+	self assert: (self entryAt: key do: [ :entry | entry progress ]) equals: 2
 ]
 
 { #category : #tests }
