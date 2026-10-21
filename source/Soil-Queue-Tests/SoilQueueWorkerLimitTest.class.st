@@ -1,12 +1,12 @@
 "
-How many workers run at once, lane by lane: a worker pool is a count of places, every
-lane draws on one, and lanes may share it.
+How many workers run at once, lane by lane: every lane has a worker limit, a count of
+places of its own, and lanes share none.
 
 On a workspace with two lanes, #a and #b, and a queue made on it without a resident, so
-that the pools are set in code. The workers are not forked, and counted as started.
+that the limits are set in code. The workers are not forked, and counted as started.
 "
 Class {
-	#name : #SoilQueueWorkerPoolTest,
+	#name : #SoilQueueWorkerLimitTest,
 	#superclass : #TestCase,
 	#instVars : [
 		'soil',
@@ -16,7 +16,7 @@ Class {
 }
 
 { #category : #helpers }
-SoilQueueWorkerPoolTest >> inTransaction: aBlock [
+SoilQueueWorkerLimitTest >> inTransaction: aBlock [
 
 	| txn |
 	txn := soil newTransaction.
@@ -28,7 +28,7 @@ SoilQueueWorkerPoolTest >> inTransaction: aBlock [
 ]
 
 { #category : #helpers }
-SoilQueueWorkerPoolTest >> laneNamed: aSymbol prefix: anInteger [
+SoilQueueWorkerLimitTest >> laneNamed: aSymbol prefix: anInteger [
 
 	^ SoilQueueLaneDescription
 		named: aSymbol
@@ -37,13 +37,13 @@ SoilQueueWorkerPoolTest >> laneNamed: aSymbol prefix: anInteger [
 ]
 
 { #category : #accessing }
-SoilQueueWorkerPoolTest >> path [
+SoilQueueWorkerLimitTest >> path [
 
-	^ 'soil-queue-worker-pool-tests'
+	^ 'soil-queue-worker-limit-tests'
 ]
 
 { #category : #helpers }
-SoilQueueWorkerPoolTest >> put: anInteger into: aSymbol [
+SoilQueueWorkerLimitTest >> put: anInteger into: aSymbol [
 
 	self inTransaction: [ :txn |
 		| workspace |
@@ -57,7 +57,7 @@ SoilQueueWorkerPoolTest >> put: anInteger into: aSymbol [
 ]
 
 { #category : #helpers }
-SoilQueueWorkerPoolTest >> queue [
+SoilQueueWorkerLimitTest >> queue [
 
 	| txn |
 	txn := soil newTransaction.
@@ -68,7 +68,7 @@ SoilQueueWorkerPoolTest >> queue [
 ]
 
 { #category : #running }
-SoilQueueWorkerPoolTest >> setUp [
+SoilQueueWorkerLimitTest >> setUp [
 
 	super setUp.
 	clock := SoilQueueTestClock at: (DateAndTime year: 2026 month: 9 day: 25 hour: 12 minute: 0 second: 0 offset: Duration zero).
@@ -92,29 +92,28 @@ SoilQueueWorkerPoolTest >> setUp [
 ]
 
 { #category : #helpers }
-SoilQueueWorkerPoolTest >> startedFor: aSymbol in: aQueue [
+SoilQueueWorkerLimitTest >> startedFor: aSymbol in: aQueue [
 
 	^ aQueue started count: [ :each | each lane name = aSymbol ]
 ]
 
 { #category : #running }
-SoilQueueWorkerPoolTest >> tearDown [
+SoilQueueWorkerLimitTest >> tearDown [
 
 	soil ifNotNil: [ soil close ].
 	super tearDown
 ]
 
 { #category : #tests }
-SoilQueueWorkerPoolTest >> testALaneWithAPoolOfItsOwnIsNotCrowdedOut [
-	"the reason for a pool of its own: a lane full of due work cannot take the places
+SoilQueueWorkerLimitTest >> testALaneIsNotCrowdedOutByAnother [
+	"the reason the places are a lane's own: a lane full of due work cannot take the places
 	another lane needs"
 
 	| queue |
 	self put: 3 into: #a.
 	self put: 3 into: #b.
 	queue := self queue.
-	(queue pool: #default) size: 2.
-	(queue lane: #b) pool: (SoilQueueWorkerPool named: #b size: 1).
+	(queue lane: #a) workerLimit: 2.
 	queue runStep.
 
 	self assert: (self startedFor: #a in: queue) equals: 2.
@@ -122,7 +121,7 @@ SoilQueueWorkerPoolTest >> testALaneWithAPoolOfItsOwnIsNotCrowdedOut [
 ]
 
 { #category : #tests }
-SoilQueueWorkerPoolTest >> testAWorkerThatEndedGivesItsPlaceBack [
+SoilQueueWorkerLimitTest >> testAWorkerThatEndedGivesItsPlaceBack [
 	"a place is taken for as long as the worker runs, and no longer"
 
 	| queue |
@@ -140,63 +139,60 @@ SoilQueueWorkerPoolTest >> testAWorkerThatEndedGivesItsPlaceBack [
 ]
 
 { #category : #tests }
-SoilQueueWorkerPoolTest >> testAPlaceIsNotKeptForAWorkerThatCouldNotBeStarted [
+SoilQueueWorkerLimitTest >> testAPlaceIsNotKeptForAWorkerThatCouldNotBeStarted [
 	"it is registered before it is started, so that the place is taken from the moment it
 	exists. When starting it fails, its #run never began and cannot give the place back, so
 	the queue does"
 
 	| queue |
 	queue := SoilQueueTestUnstartableQueue from: self queue.
-	(queue pool: #default) size: 1.
 	self should: [ queue startWorkerFor: (queue lane: #a) ] raise: Error.
 	self assert: queue workers equals: #(  ).
-	self assert: (queue freePlacesIn: (queue pool: #default)) equals: 1
+	self assert: (queue freePlacesIn: (queue lane: #a)) equals: 1
 ]
 
 { #category : #tests }
-SoilQueueWorkerPoolTest >> testAWorkerThatNeverRanGivesItsPlaceBackWhenTheProcessesAreTerminated [
+SoilQueueWorkerLimitTest >> testAWorkerThatNeverRanGivesItsPlaceBackWhenTheProcessesAreTerminated [
 	"a worker that was terminated before its #run began never reaches the end of it, which is
-	where a worker takes itself out. With a pool of one place that would be no worker at all
-	for ever, and a queue that never says it is quiet"
+	where a worker takes itself out. With a limit of one place that would be no worker at
+	all for ever, and a queue that never says it is quiet"
 
 	| queue |
 	self put: 1 into: #a.
 	queue := self queue.
-	(queue pool: #default) size: 1.
 	queue runStep.
 	self assert: queue started size equals: 1.
-	self assert: (queue freePlacesIn: (queue pool: #default)) equals: 0.
+	self assert: (queue freePlacesIn: (queue lane: #a)) equals: 0.
 	self deny: queue basicIsIdle.
 	queue terminateProcesses.
 	self assert: queue workers equals: #(  ).
-	self assert: (queue freePlacesIn: (queue pool: #default)) equals: 1.
+	self assert: (queue freePlacesIn: (queue lane: #a)) equals: 1.
 	self assert: queue basicIsIdle
 ]
 
 { #category : #tests }
-SoilQueueWorkerPoolTest >> testByDefaultAllLanesShareOnePool [
-	"one pool for all lanes, the size of the description's worker limit -- the upper bound
-	of the whole queue"
+SoilQueueWorkerLimitTest >> testByDefaultEveryLaneHasOnePlaceOfItsOwn [
+	"one, the cautious direction, and not shared: an upper bound for the whole queue there
+	is only as the sum of its lanes'"
 
 	| queue |
 	self put: 3 into: #a.
 	self put: 3 into: #b.
 	queue := self queue.
-	(queue pool: #default) size: 2.
 	queue runStep.
 
-	self assert: queue started size equals: 2.
-	self assert: (queue lane: #a) pool identicalTo: (queue lane: #b) pool
+	self assert: (self startedFor: #a in: queue) equals: 1.
+	self assert: (self startedFor: #b in: queue) equals: 1
 ]
 
 { #category : #tests }
-SoilQueueWorkerPoolTest >> testNoPoolWithoutAPlace [
+SoilQueueWorkerLimitTest >> testNoLaneWithoutAPlace [
 
-	self should: [ SoilQueueWorkerPool named: #none size: 0 ] raise: Error
+	self should: [ (SoilQueueLane named: #none) workerLimit: 0 ] raise: Error
 ]
 
 { #category : #helpers }
-SoilQueueWorkerPoolTest >> workspaceIn: aTransaction [
+SoilQueueWorkerLimitTest >> workspaceIn: aTransaction [
 
 	^ aTransaction root at: #queue
 ]

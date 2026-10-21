@@ -84,7 +84,7 @@ SoilQueueGroupedDispatchTest >> queue [
 	  queue := SoilQueueTestUnforkedQueue from: ((SoilQueue onWorkspace: (self workspaceIn: txn) in: txn)
 		clock: clock;
 		yourself).
-	  (queue pool: #default) size: 10.
+	  (queue lane: #groups) workerLimit: 10.
 	  queue ]
 		ensure: [ txn abort ]
 ]
