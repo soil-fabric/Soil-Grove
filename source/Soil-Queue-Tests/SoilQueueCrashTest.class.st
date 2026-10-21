@@ -154,7 +154,7 @@ SoilQueueCrashTest >> queue [
 SoilQueueCrashTest >> retriesOf: aKey [
 
 	^ self entryAt: aKey do: [ :entry |
-		{ entry state. entry orphanedRetries. entry failureRetries } ]
+		{ entry state. entry orphanedRetries } ]
 ]
 
 { #category : #running }
@@ -219,7 +219,7 @@ SoilQueueCrashTest >> testAClaimCountsNoRetry [
 	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
 	self crashBeforeTheNextStepOn: key.
 
-	self assert: (self retriesOf: key) equals: #( #claimed 0 0 )
+	self assert: (self retriesOf: key) equals: #( #claimed 0 )
 ]
 
 { #category : #tests }
@@ -271,7 +271,7 @@ SoilQueueCrashTest >> testAnEntryThatKeepsLosingItsWorkerIsParked [
 	2 timesRepeat: [
 		self crashBeforeTheNextStepOn: key.
 		self queue recoverOrphanedClaims ].
-	self assert: (self retriesOf: key) equals: #( #pending 2 0 ).
+	self assert: (self retriesOf: key) equals: #( #pending 2 ).
 
 	self crashBeforeTheNextStepOn: key.
 	self queue recoverOrphanedClaims.
@@ -289,7 +289,7 @@ SoilQueueCrashTest >> testAnOrphanedClaimCountsAsAnOrphanedRetry [
 	self crashBeforeTheNextStepOn: key.
 	self queue recoverOrphanedClaims.
 
-	self assert: (self retriesOf: key) equals: #( #pending 1 0 )
+	self assert: (self retriesOf: key) equals: #( #pending 1 )
 ]
 
 { #category : #tests }
@@ -399,7 +399,7 @@ SoilQueueCrashTest >> testAQueueThatStartsAgainGivesBackWhatTheRunBeforeLeft [
 	txn := soil newTransaction.
 	[ queue prepareIn: txn ] ensure: [ txn abort ].
 	queue recoverOrphanedClaims.
-	self assert: (self retriesOf: key) equals: #( #pending 1 0 )
+	self assert: (self retriesOf: key) equals: #( #pending 1 )
 ]
 
 { #category : #tests }
@@ -429,10 +429,10 @@ SoilQueueCrashTest >> testAStepThatGoesThroughEndsTheRowOfLostWorkers [
 	2 timesRepeat: [
 		self crashBeforeTheNextStepOn: key.
 		self queue recoverOrphanedClaims ].
-	self assert: (self retriesOf: key) equals: #( #pending 2 0 ).
+	self assert: (self retriesOf: key) equals: #( #pending 2 ).
 
 	self workOneUnit.
-	self assert: (self retriesOf: key) equals: #( #pending 0 0 )
+	self assert: (self retriesOf: key) equals: #( #pending 0 )
 ]
 
 { #category : #tests }
@@ -464,7 +464,7 @@ SoilQueueCrashTest >> testWithoutALimitAnOrphanAlwaysComesBack [
 		self crashBeforeTheNextStepOn: key.
 		self queue recoverOrphanedClaims ].
 
-	self assert: (self retriesOf: key) equals: #( #pending 5 0 )
+	self assert: (self retriesOf: key) equals: #( #pending 5 )
 ]
 
 { #category : #helpers }

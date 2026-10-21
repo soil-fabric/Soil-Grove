@@ -91,7 +91,6 @@ SoilQueueLaneSettingsTest >> testALaneSettingIsCheckedWhenItIsSet [
 	"not at the next start, where it would stop the resident from coming up"
 
 	self configure: [ :description |
-		self should: [ description failureRetryLimit: -1 forLane: #b ] raise: Error.
 		self should: [ description orphanedRetryLimit: -1 forLane: #b ] raise: Error.
 		self should: [ description workerLimit: 0 forLane: #b ] raise: Error ]
 ]
@@ -117,12 +116,12 @@ SoilQueueLaneSettingsTest >> testWhatIsNotSetForALaneComesFromAllLanes [
 	| queue |
 	self configure: [ :description |
 		description
-			failureRetryLimit: 5;
+			orphanedRetryLimit: 5;
 			backoffBase: 2 seconds;
 			backoffBase: 10 seconds forLane: #b ].
 	queue := self queue.
 
-	self assert: (queue lane: #b) failureRetryLimit equals: 5.
+	self assert: (queue lane: #b) orphanedRetryLimit equals: 5.
 	self assert: (queue lane: #b) backoffBase equals: 10 seconds.
 	self assert: (queue lane: #c) backoffBase equals: 2 seconds.
 	self assert: (queue lane: #b) backoffCap equals: 1 hour

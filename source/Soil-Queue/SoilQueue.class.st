@@ -38,9 +38,9 @@ workers there should be and when to wake next, and does no work itself. A QueueW
 asks me, claims, works, gives back, and asks again. A stop reaches all of them through
 me -- I stop handing out, and the workers run dry.
 
-What happens to an entry is decided by the entry: whether a failure is worth retrying,
-what holds after a crash, what giving up means for its target. How often and how soon
-again is the lane's -- the retry budget and the backoff.
+What happens to an entry is decided by the entry: what holds after a crash, what giving
+up means for its target. How often it comes back and how soon is the lane's -- the limit
+and the backoff.
 "
 Class {
 	#name : #SoilQueue,
@@ -240,38 +240,26 @@ SoilQueue >> basicIsIdle [
 
 { #category : #working }
 SoilQueue >> book: anError for: aKey [
-	"the work unit of an entry threw, and its transaction is gone. What is left to do is
-	mine, in a transaction of my own: ask the entry what the error means, and then either
-	put it off and count it, or give up on it. Whether it may be tried once more, and how
-	long it waits, is the lane's to say.
+	"the work unit of an entry failed at its work, and its transaction is gone. What is left
+	to do is mine, in a transaction of my own: the entry gets to say so to its target
+	(#giveUp:in:), and is done.
 
-	Put off: #failureRetries goes up, the due time moves out by the delay the entry asks
-	for, and the key moves with it -- the dispatcher reads the next wake time off the
-	ordering, at the step the end of the worker brings. Given up: the entry gets to say so
-	to its target (#giveUp:in:), and is done. A failure the entry cannot get past is a
-	result, not a dead letter; that one is kept for entries nobody could get to at all.
+	A failure at the work is a result. It is not tried again and not parked: a retry a far
+	side would want is the entry's own business, a due time it sets itself, and a dead
+	letter is kept for an entry that keeps coming back because nobody gets as far as its
+	work -- see #recover:.
 
 	The error is kept for diagnosis. It is not counted as a step error: that count is what
 	shows a crash loop, and a failure that was handled is none"
 
 	lastStepError := anError.
 	self withTransactionDo: [ :txn |
-		| workspace lane entry |
+		| workspace entry |
 		workspace := self workspaceIn: txn.
-		lane := self laneFor: aKey in: workspace.
 		entry := workspace entryAt: aKey.
-		((entry classifyError: anError) == #retriable
-			and: [ lane allowsFailureRetryOf: entry ])
-			ifTrue: [
-				entry noteFailure.
-				entry readyAt: self now
-					+ (entry retryDelayAfter: entry failureRetries under: lane).
-				entry releaseClaim.
-				workspace moveKey: aKey for: entry ]
-			ifFalse: [
-				entry giveUp: anError in: txn.
-				workspace removeKey: aKey.
-				entry markDone ].
+		entry giveUp: anError in: txn.
+		workspace removeKey: aKey.
+		entry markDone.
 		txn commit ]
 ]
 
@@ -487,8 +475,8 @@ SoilQueue >> recover: aKey [
 	Compensated first all the same, so that what it left behind is not left lying under a
 	dead letter.
 
-	An entry that is given back waits first, by the same curve a failed work unit waits by:
-	what took its worker away -- a commit that does not go through, a segment that is not
+	An entry that is given back waits first, by the curve of its lane: what took its worker
+	away -- a commit that does not go through, a segment that is not
 	there yet -- is often gone after a short while, and without the wait the budget would be
 	used up in milliseconds. The key moves with the time, in the same commit."
 
@@ -503,7 +491,7 @@ SoilQueue >> recover: aKey [
 			ifTrue: [
 				entry noteOrphaned.
 				entry releaseClaim.
-				entry readyAt: self now + (entry retryDelayAfter: entry orphanedRetries under: lane).
+				entry readyAt: self now + (lane retryDelayAfter: entry orphanedRetries).
 				workspace moveKey: aKey for: entry ]
 			ifFalse: [ workspace deadLetter: aKey ].
 		txn commit ]
@@ -679,8 +667,9 @@ SoilQueue >> startWorkersForWhatIsDue [
 { #category : #working }
 SoilQueue >> stepFailed: anError on: aKey [
 	"an error got out of the step of the entry at aKey, and nobody booked it: the work unit
-	did not throw (that one is booked, see #book:for:), something around it did -- the commit,
-	a conflict that did not resolve, the bookkeeping itself. The entry still says claimed and
+	did not fail at its work (that one is booked, see #book:for:), something around it did --
+	the commit, a conflict that did not resolve, a record that could not be read, the
+	bookkeeping itself. The entry still says claimed and
 	no worker holds it any more, which is exactly what a lost worker leaves behind, so it goes
 	back the same way: #recover: counts it, compensates a compensating one first, waits, and
 	parks it when the lane allows no more.
@@ -739,7 +728,7 @@ SoilQueue >> wakeAt [
 
 { #category : #working }
 SoilQueue >> work: aKey [
-	"step 3, with the one failure that is neither of the two the entry knows about.
+	"step 3, with the one failure that is run again at once.
 
 	A write conflict says that the worker was there and the work was fine and it simply did
 	not happen: somebody else committed the same objects first. So the same work unit runs
@@ -804,33 +793,23 @@ SoilQueue >> workOnce: aKey [
 	the target: only the reference travels. An entry that did not move its due time keeps
 	its key and is due again immediately.
 
-	An entry that is not ready to run never gets as far as its work unit: something it
-	needs is gone, no repetition will bring it back, and it is parked as a dead letter
-	instead. That is infrastructure and is kept apart from failing *at* the work, which is
-	a result and ends in #markDone.
-
-	A work unit that throws discards the whole transaction, and I answer the error, so that
-	it is booked in a transaction of its own (#book:for:). Only an error out of the work
-	unit is answered. One from anywhere else -- the commit, the store -- is no statement
-	about the work, and classifying it would let the entry's #permanent throw away work
-	that never got to run; it passes, and the entry stays claimed for the recovery pass.
-	A write conflict passes too, wherever it comes from: it is neither of the two failures
-	an entry knows about, and #work: runs the unit again for it. Otherwise I answer nil."
+	Two ways to fail, told apart by where the error comes from. One that is not Soil's is a
+	statement about the work: the whole transaction is discarded, and I answer the error,
+	so that it is booked in a transaction of its own (#book:for:) -- the entry gives up.
+	One that is Soil's is no statement about the work, wherever it comes from -- a write
+	conflict, a record of the target that cannot be read, a segment that is not there yet
+	-- and it passes. #work: runs the unit again for a conflict; anything else gets out of
+	the step, and the entry, still claimed, goes back the way an orphan goes back, after a
+	wait, and is parked when its lane allows no more (#stepFailed:on:). Otherwise I answer
+	nil."
 
 	self withTransactionDo: [ :txn |
 		| workspace entry outcome |
 		workspace := self workspaceIn: txn.
 		entry := workspace entryAt: aKey.
-		(entry isReadyToRunIn: txn)
-			ifFalse: [
-				workspace deadLetter: aKey.
-				txn commit.
-				^ self ].
 		outcome := [ entry performIn: txn ]
-			on: Error
-			do: [ :anError |
-				(anError isKindOf: SoilObjectHasConcurrentChange) ifTrue: [ anError pass ].
-				^ anError ].
+			on: Error - SoilError
+			do: [ :anError | ^ anError ].
 		outcome == #more
 			ifTrue: [
 				entry releaseClaim.

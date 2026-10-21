@@ -34,23 +34,22 @@ which of the three it is --
 	#repeating     run again from the start; idempotence is a promise, not an assumption
 	#compensating  clean up what the aborted attempt left behind, then start over
 
-I count my repetitions in two fields, one for each reason there can be, because the two
-must not use up each other's budget. #orphanedRetries counts how often my worker went
-away while I was claimed -- a crash, a deploy, a rolling release; nobody's fault and no
-cost. #failureRetries counts how often my work unit failed with an error my subclass
-called retriable -- a far side that answered 503; that one counts against the work.
-Neither is a count of attempts: a claim is taken for every attempt, the first one
-included, and counting there would make every failure look like a lost worker too.
+I count how often I was given back: #orphanedRetries, once for each time I was found
+claimed with no worker holding me -- my worker went away, a crash, a deploy, a rolling
+release, or something around my work unit failed: a commit that did not go through, a
+record that could not be read. It is not a count of attempts: a claim is taken for every
+attempt, the first one included. A failure *at* my work is not counted at all. It is a
+result: my target hears of it (#giveUp:in:), and I am done.
 
-Both count in a row: a step of mine that goes through sets them back to nothing. What
-they are read for -- the wait before the next try, and the limit of my lane -- is about
+The count is of times in a row: a step of mine that goes through sets it back to nothing.
+What it is read for -- the wait before the next try, and the limit of my lane -- is about
 one step that keeps failing, not about how long I have been around. Counted over my whole
 life, an entry that lives through many steps -- a flow instance -- would carry every
 deploy it ever saw into the wait before its next step.
 
 I say myself that a step went through (#noteStepDone); the queue cannot tell. #more is the
 answer of a unit that only put itself off as well -- a throttle that asked to wait, a
-switched-off target looked at again -- and setting the counts back for one of those would
+switched-off target looked at again -- and setting the count back for one of those would
 keep an entry whose step never goes through from ever reaching its limit.
 
 Waiting is courtesy, not a guarantee. A maintenance run can let entries finish; a crash
@@ -73,7 +72,6 @@ Class {
 		'id',
 		'progress',
 		'orphanedRetries',
-		'failureRetries',
 		'groupId'
 	],
 	#category : #'Soil-Queue'
@@ -131,21 +129,6 @@ SoilQueueEntry >> claimedAt [
 ]
 
 { #category : #working }
-SoilQueueEntry >> classifyError: anError [
-	"translate an error out of my work unit into #retriable or #permanent. The queue calls
-	overridden code and has to deal with whatever comes back without knowing what went
-	wrong, which is why the translation is mine.
-
-	The default is #permanent. The other way round, every new kind of work would silently
-	get retries that nobody thought through. The case worth reading twice is a timeout: it
-	does not mean nothing happened, because the call can have succeeded on the far side.
-	Failures *before* the request went out -- connect refused, DNS, TLS -- are safe to
-	repeat; failures after it are only safe when the far side is known to be idempotent."
-
-	^ #permanent
-]
-
-{ #category : #working }
 SoilQueueEntry >> compensateIn: aTransaction [
 	"undo what an aborted attempt left behind, so a fresh attempt starts from a clean
 	state. Only ever called for an entry whose resumption is #compensating. The other two
@@ -176,22 +159,12 @@ SoilQueueEntry >> readyAt: aDateAndTime [
 	readyAt := aDateAndTime
 ]
 
-{ #category : #accessing }
-SoilQueueEntry >> failureRetries [
-	"how often in a row my work unit failed with an error my subclass called retriable and
-	was run again, since my last step that went through. What counts against the work: a
-	far side that failed, a configuration that does not hold -- never a worker that went
-	away"
-
-	^ failureRetries
-]
-
 { #category : #working }
 SoilQueueEntry >> giveUp: anError in: aTransaction [
-	"my work unit failed and will not be tried again: the error was not retriable, or the
-	retries are used up. Called in the queue's bookkeeping transaction, after the one my
-	work unit threw in is gone, and before I am taken out of the ordering in the same
-	commit.
+	"my work unit failed at its work, and that is my end: a failure at the work is a
+	result, and it is not tried again. Called in the queue's bookkeeping transaction, after
+	the one my work unit threw in is gone, and before I am taken out of the ordering in the
+	same commit.
 
 	The place for a subclass to put its target into its error state -- a flow instance
 	that ends in error, say. What that means is the subclass's business; the queue only
@@ -229,27 +202,7 @@ SoilQueueEntry >> initialize [
 	state := #pending.
 	resumption := self class resumption.
 	id := self class newId.
-	orphanedRetries := 0.
-	failureRetries := 0
-]
-
-{ #category : #testing }
-SoilQueueEntry >> isReadyToRunIn: aTransaction [
-	"whether the queue can get to my work at all. Asked before the work unit runs, and the
-	answer separates two things that look alike from outside: a wrapper that reads but
-	points at nothing is infrastructure and there is no retrying it -- the answer is the
-	dead letter. An error out of the work unit itself never comes through here; that one
-	belongs to the work unit and its own classification.
-
-	The default resolves the target, because that is the part that can be gone. Resolving
-	has to be asked for: a proxy answers #isNil, #notNil and even #class without touching
-	the store, so none of those would notice. A target that was never set is not the same
-	as one that is gone, and it passes."
-
-	^ [ target isSoilProxy ifTrue: [ target soilRealObject ].
-	  true ]
-		on: Error
-		do: [ :anError | false ]
+	orphanedRetries := 0
 ]
 
 { #category : #testing }
@@ -300,13 +253,6 @@ SoilQueueEntry >> markDone [
 ]
 
 { #category : #accessing }
-SoilQueueEntry >> noteFailure [
-	"my work unit failed with an error I called retriable, and I am about to be put off"
-
-	failureRetries := failureRetries + 1
-]
-
-{ #category : #accessing }
 SoilQueueEntry >> noteOrphaned [
 	"my worker went away while I was claimed, and I am about to be given back. Counted here,
 	at the one moment the queue finds that out, and not at the claim"
@@ -316,24 +262,22 @@ SoilQueueEntry >> noteOrphaned [
 
 { #category : #accessing }
 SoilQueueEntry >> noteStepDone [
-	"a step of mine went through. That ends a row: both counts are of repetitions in a row,
-	so the next one waits from the start of the curve again, and my lane's limit starts
-	over.
+	"a step of mine went through. That ends a row: the count is of times in a row I was
+	given back, so the next one waits from the start of the curve again, and my lane's
+	limit starts over.
 
 	Called from my #performIn:, so it is written with the step and goes with it when the
 	commit does not go through. A unit that only put itself off does not call it. One that
 	forgets to counts over its whole life -- it is parked sooner, never later"
 
-	orphanedRetries := 0.
-	failureRetries := 0
+	orphanedRetries := 0
 ]
 
 { #category : #accessing }
 SoilQueueEntry >> orphanedRetries [
 	"how often in a row I was found claimed with no worker holding me and was given back,
-	since my last step that went through: the image went away, a deploy, a rolling release.
-	Nobody's fault and no cost, which is why it is kept apart from #failureRetries -- a
-	deploy must not use up the budget of a far side that is failing"
+	since my last step that went through: the image went away, a deploy, a rolling release,
+	a step that failed around my work unit rather than at it"
 
 	^ orphanedRetries
 ]
@@ -400,14 +344,6 @@ SoilQueueEntry >> resumption [
 	entry"
 
 	^ resumption
-]
-
-{ #category : #working }
-SoilQueueEntry >> retryDelayAfter: anInteger under: aLane [
-	"how long to wait before retry number anInteger. The curve of the lane I lie in by
-	default; a subclass whose kind of work wants a different pace answers its own"
-
-	^ aLane retryDelayAfter: anInteger
 ]
 
 { #category : #accessing }

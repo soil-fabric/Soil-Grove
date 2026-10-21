@@ -1,16 +1,16 @@
 "
 The live half of a lane: what it decides about its entries.
 
-A lane is a place the queue hands entries out from, with a retry budget, a backoff and a
-worker limit of its own -- how many of its workers may run at once. Lanes share no
-places. Its stored half, SoilQueueLaneDescription, lies in the workspace and says where
-its entries are; I say how they are tried again. The queue builds me from both when
-it is created and again at every start, and after that nobody reads the configuration
-for me: a changed setting holds from the next start on, the way it does for a resident.
-Without a resident, whoever creates the queue sets my values in code.
+A lane is a place the queue hands entries out from, with a limit for entries given back,
+a backoff and a worker limit of its own -- how many of its workers may run at once.
+Lanes share no places. Its stored half, SoilQueueLaneDescription, lies in the workspace
+and says where its entries are; I say how they are tried again. The queue builds me from
+both when it is created and again at every start, and after that nobody reads the
+configuration for me: a changed setting holds from the next start on, the way it does
+for a resident. Without a resident, whoever creates the queue sets my values in code.
 
-What I decide: whether an entry may be tried once more after a failure or after losing
-its worker, and how long it waits before the next try.
+What I decide: whether an entry that was given back may come back once more, and how long
+it waits before it does.
 
 My values are only read once the queue runs, so asking me needs no lock. The one thing
 of mine that changes, the key handed out last, is read and written under the queue's
@@ -21,7 +21,6 @@ Class {
 	#superclass : #Object,
 	#instVars : [
 		'name',
-		'failureRetryLimit',
 		'orphanedRetryLimit',
 		'backoffBase',
 		'backoffCap',
@@ -46,14 +45,6 @@ SoilQueueLane class >> named: aSymbol configuredFrom: aDescription [
 		setName: aSymbol;
 		configureFrom: aDescription;
 		yourself
-]
-
-{ #category : #retrying }
-SoilQueueLane >> allowsFailureRetryOf: anEntry [
-	"whether an entry whose work unit failed retriably may be tried once more. With a limit
-	of three, three retries in a row happen and the fourth failure is the one that gives up"
-
-	^ anEntry failureRetries < failureRetryLimit
 ]
 
 { #category : #retrying }
@@ -97,25 +88,10 @@ SoilQueueLane >> configureFrom: aDescription [
 	and at every start -- and only then. Another lane answers the same, which is how a lane
 	added to a running queue starts out like the default lane"
 
-	failureRetryLimit := aDescription failureRetryLimit.
 	orphanedRetryLimit := aDescription orphanedRetryLimit.
 	backoffBase := aDescription backoffBase.
 	backoffCap := aDescription backoffCap.
 	workerLimit := aDescription workerLimit
-]
-
-{ #category : #retrying }
-SoilQueueLane >> failureRetryLimit [
-
-	^ failureRetryLimit
-]
-
-{ #category : #retrying }
-SoilQueueLane >> failureRetryLimit: anInteger [
-
-	anInteger < 0 ifTrue: [
-		^ self error: 'a negative number of retries cannot be used up' ].
-	failureRetryLimit := anInteger
 ]
 
 { #category : #accessing }
