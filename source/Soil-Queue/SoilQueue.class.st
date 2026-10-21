@@ -794,10 +794,12 @@ SoilQueue >> workOnce: aKey [
 	its key and is due again immediately.
 
 	Two ways for the work unit to fail, told apart by the class of the error. One that is
-	not a SoilError is taken as a statement about the work: the whole transaction is
-	discarded, and I answer the error, so that it is booked in a transaction of its own
-	(#book:for:) -- the entry gives up. A SoilError is not -- a write conflict, a segment
-	that is not there yet, an index that points nowhere -- and it passes. #work: runs the
+	neither a SoilError nor a SoilSerializerError -- Soil's own two kinds, the serializer's
+	lying below Soil's core -- is taken as a statement about the work: the whole
+	transaction is discarded, and I answer the error, so that it is booked in a
+	transaction of its own (#book:for:) -- the entry gives up. Soil's own are not -- a
+	write conflict, a segment that is not there yet, a record Soil cannot read
+	(SoilUnreadableRecord), a layout that cannot be migrated -- and they pass. #work: runs the
 	unit again for a conflict; anything else gets out of the step, and the entry, still
 	claimed, goes back the way an orphan goes back, after a wait, and is parked when its
 	lane allows no more (#stepFailed:on:). Only the work unit is watched like this: an
@@ -809,7 +811,7 @@ SoilQueue >> workOnce: aKey [
 		workspace := self workspaceIn: txn.
 		entry := workspace entryAt: aKey.
 		outcome := [ entry performIn: txn ]
-			on: Error - SoilError
+			on: Error - SoilError - SoilSerializerError
 			do: [ :anError | ^ anError ].
 		outcome == #more
 			ifTrue: [
