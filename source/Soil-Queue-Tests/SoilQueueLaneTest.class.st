@@ -113,28 +113,23 @@ SoilQueueLaneTest >> tearDown [
 ]
 
 { #category : #tests }
-SoilQueueLaneTest >> testAChangedRateHoldsFromTheNextStart [
-	"the lane took its values when the queue was configured. A rate written on the description
-	afterwards is the configuration of the next start -- a restart of the resident is how it
-	takes effect, the way it is for every resident"
+SoilQueueLaneTest >> testAChangedValueHoldsFromTheNextStart [
+	"the lane took its values when the queue was configured. A value written on the
+	description afterwards is the configuration of the next start -- a restart of the
+	resident is how it takes effect, the way it is for every resident"
 
-	| queue workspace txn |
+	| queue txn |
 	soil addResidentDescription: (SoilQueueDescription
 		named: #work
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24).
-	workspace := [ :aTransaction | (self descriptionIn: aTransaction) workspace ].
 	queue := self residentQueue.
-	self inTransaction: [ :t | (self descriptionIn: t) rateLimit: 1 per: 1 minute ].
-	self put: 3 into: workspace.
-	(SoilQueueWorker on: queue) run.
-	self assert: (self left: workspace) equals: 0.
+	self inTransaction: [ :t | (self descriptionIn: t) backoffBase: 1 minute ].
+	self assert: (queue lane: #default) backoffBase equals: 1 second.
 
 	txn := soil newTransaction.
 	[ queue prepareIn: txn ] ensure: [ txn abort ].
-	self put: 3 into: workspace.
-	(SoilQueueWorker on: queue) run.
-	self assert: (self left: workspace) equals: 2
+	self assert: (queue lane: #default) backoffBase equals: 1 minute
 ]
 
 { #category : #tests }
@@ -253,9 +248,8 @@ SoilQueueLaneTest >> testWithoutAResidentTheValuesAreSetOnTheLane [
 	[ queue := (SoilQueue onWorkspace: (workspace value: txn) in: txn)
 		clock: clock;
 		yourself ] ensure: [ txn abort ].
-	(queue lane: #default) rateLimit: 1 per: 1 minute.
+	self assert: (queue lane: #default) backoffBase equals: 1 second.
 
-	self put: 3 into: workspace.
-	(SoilQueueWorker on: queue) run.
-	self assert: (self left: workspace) equals: 2
+	(queue lane: #default) backoffBase: 1 minute.
+	self assert: ((queue lane: #default) retryDelayAfter: 1) equals: 1 minute
 ]

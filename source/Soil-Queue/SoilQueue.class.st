@@ -20,13 +20,13 @@ already be a snapshot of an older moment in the transaction that works on it. Fo
 same reason what I hand out is a key, and whoever takes it opens a transaction of its
 own.
 
-I hand out per lane. A lane is a place entries go out from with a pace of its own; its
-stored half lies in my workspace, its live half -- the rate, the retry budget, the
-backoff, the count of what went out -- is a SoilQueueLane I build at every start, and only
-then: a changed setting holds from the next start on. Made by my description and not
-started yet -- loaded but switched off, say -- I have no live lanes, and whoever asks for
-one hears that I am not started. Without a resident, whoever creates me on a workspace
-(#onWorkspace:in:) gets the lanes built right there and sets their values in code.
+I hand out per lane. A lane is a place entries go out from with a retry budget and a
+backoff of its own; its stored half lies in my workspace, its live half is a
+SoilQueueLane I build at every start, and only then: a changed setting holds from the
+next start on. Made by my description and not started yet -- loaded but switched off,
+say -- I have no live lanes, and whoever asks for one hears that I am not started.
+Without a resident, whoever creates me on a workspace (#onWorkspace:in:) gets the lanes
+built right there and sets their values in code.
 
 Every lane draws its workers from a worker pool, a count of places; lanes may share one,
 and by default all of them do. Before I start a worker for a lane there has to be a place
@@ -39,8 +39,8 @@ asks me, claims, works, gives back, and asks again. A stop reaches all of them t
 me -- I stop handing out, and the workers run dry.
 
 What happens to an entry is decided by the entry: whether a failure is worth retrying,
-what holds after a crash, what giving up means for its target. How often and how fast is
-the lane's -- the retry budget, the backoff and the rate.
+what holds after a crash, what giving up means for its target. How often and how soon
+again is the lane's -- the retry budget and the backoff.
 "
 Class {
 	#name : #SoilQueue,
@@ -205,10 +205,8 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTrans
 	Nothing goes out for a lane that has been removed; a worker the dispatcher started for it
 	just before runs dry.
 
-	The rate is checked here, at the outlet, because it is the lane's and not an entry's.
-	A due entry the rate does not let out yet is not handed out, and the time the rate has
-	room again is what aBlock hears -- so the worker that runs dry hands that on as the wake
-	time, just as it does the due time of an entry that is not due yet."
+	When nothing is due, aBlock hears the due time of the next entry -- so the worker that
+	runs dry hands that on as the wake time."
 
 	| key nextTime |
 	key := mutex critical: [
@@ -223,16 +221,8 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTrans
 			after: aLane lastIssuedKey
 			ifNone: [ :time | nextTime := time. nil ].
 		found ifNotNil: [
-			| free |
-			free := aLane rateFreeAt: aDateAndTime.
-			free > aDateAndTime
-				ifTrue: [
-					nextTime := free.
-					found := nil ]
-				ifFalse: [
-					inFlight add: found.
-					aLane noteIssueAt: aDateAndTime.
-					aLane lastIssuedKey: found ] ].
+			inFlight add: found.
+			aLane lastIssuedKey: found ].
 		found ].
 	^ key ifNil: [ aBlock cull: nextTime ]
 ]
@@ -312,8 +302,8 @@ SoilQueue >> configureFrom: aDescription in: aTransaction [
 	only then: after that nobody reads the configuration for me. A queue without a resident
 	is configured once, where it is created on its workspace.
 
-	The lanes are built anew, and with them their count of what went out lately -- a
-	restart that forgets it lets at most one period's worth out early"
+	The lanes are built anew, and with them the turn of a grouped lane: it begins at the
+	front again (#lastIssuedKey)"
 
 	| workspace pools |
 	workspace := self workspaceIn: aTransaction.
@@ -596,11 +586,7 @@ SoilQueue >> rememberNextDueTime [
 	"the last thing a step does: read when the first entry of each lane falls due, and keep
 	the earliest. Only a time still to come is a wake time. One that has come is the
 	workers' business -- they are running for it, and the last of them to run dry hands on
-	what it found.
-
-	With a lane's rate used up, 'due now' is not a time to wake at: nothing of that lane may
-	go before the rate has room again, and no worker is running to say so. So the wake time
-	of a lane is the later of the two"
+	what it found."
 
 	| time |
 	time := self withTransactionDo: [ :txn |
@@ -613,9 +599,7 @@ SoilQueue >> rememberNextDueTime [
 				(workspace nextDueTimeAt: now in: (workspace laneNamed: lane name))
 					ifNil: [ earliest ]
 					ifNotNil: [ :due |
-						| wake |
-						wake := due max: (mutex critical: [ lane rateFreeAt: now ]).
-						earliest ifNil: [ wake ] ifNotNil: [ earliest min: wake ] ] ] ].
+						earliest ifNil: [ due ] ifNotNil: [ earliest min: due ] ] ] ].
 	(time notNil and: [ time > self now ]) ifFalse: [ ^ self ].
 	mutex critical: [
 		wakeAt := wakeAt
@@ -704,8 +688,7 @@ SoilQueue >> startWorkersForWhatIsDue [
 	The count stops at the limit and at the first entry that is not due, so the scan costs
 	the same whether ten entries are waiting or ten thousand. The number of waiting entries
 	says nothing about how many workers are needed anyway -- it only says how long the
-	working takes. Nor for more than a lane's rate lets out right now: a worker started for
-	an entry that may not go yet would only end again at once.
+	working takes.
 
 	Every worker takes a place in the pool of its lane, and a lane gets no more than its
 	pool has free -- lanes that share a pool share its places. A lane that already has
@@ -721,8 +704,10 @@ SoilQueue >> startWorkersForWhatIsDue [
 				| workspace now |
 				workspace := self workspaceIn: txn.
 				now := self now.
-				(workspace dueCountAt: now in: (workspace laneNamed: lane name) upTo: lane pool size)
-					min: (mutex critical: [ lane rateAllowanceAt: now ifNone: [ lane pool size ] ]) ].
+				workspace
+					dueCountAt: now
+					in: (workspace laneNamed: lane name)
+					upTo: lane pool size ].
 			running := mutex critical: [ workers count: [ :each | each lane name = lane name ] ].
 			((wanted - running) min: free) timesRepeat: [ self startWorkerFor: lane ] ] ]
 ]

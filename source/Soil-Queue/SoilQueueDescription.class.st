@@ -3,8 +3,8 @@ What makes a queue a resident: I create it when the database opens and let the r
 machinery start it, and the start configures it. The queue itself works on its workspace, a
 SoilQueueWorkspace, and runs the same with or without me around it.
 
-I hold that workspace and the configuration -- how many workers, the rate, the retry
-budgets and the backoff. None of that shapes a key; what does, the index and the format,
+I hold that workspace and the configuration -- how many workers, the retry budgets and
+the backoff. None of that shapes a key; what does, the index and the format,
 belongs to the workspace, because whoever opens it without me still has to find the
 entries. I am read to configure the queue at every start, and only then: my values go to
 its lanes, which hold them until the next start. The queue reaches its
@@ -37,8 +37,6 @@ Class {
 		'failureRetryLimit',
 		'backoffBase',
 		'backoffCap',
-		'rateLimit',
-		'ratePeriod',
 		'laneValues',
 		'poolSizes'
 	],
@@ -111,7 +109,6 @@ SoilQueueDescription >> configureLane: aLane [
 	| values |
 	values := laneValues ifNil: [ ^ self ].
 	values := values at: aLane name ifAbsent: [ ^ self ].
-	values at: #rate ifPresent: [ :rate | aLane rateLimit: rate key per: rate value ].
 	values at: #failureRetryLimit ifPresent: [ :limit | aLane failureRetryLimit: limit ].
 	values at: #orphanedRetryLimit ifPresent: [ :limit | aLane orphanedRetryLimit: limit ].
 	values at: #backoffBase ifPresent: [ :duration | aLane backoffBase: duration ].
@@ -215,43 +212,6 @@ SoilQueueDescription >> printOn: aStream [
 	aStream << ' ' << name
 ]
 
-{ #category : #rate }
-SoilQueueDescription >> rateLimit [
-	"how many entries may be handed out in any period of #ratePeriod, or nil for no rate at
-	all -- the default, and how a queue ran before it had one. A number here is what a far
-	side accepts per so long; it is the embedder's to know.
-
-	The rate of every lane that has none of its own: work that needs a pace of its own gets
-	a lane of its own, and its rate by #rateLimit:per:forLane:"
-
-	^ rateLimit
-]
-
-{ #category : #rate }
-SoilQueueDescription >> rateLimit: anInteger per: aDuration [
-	"no more than anInteger entries handed out in any period of aDuration. Any period, not
-	the one on the clock: a burst up to the limit may go at once, and then the rate waits
-	until the oldest of it is aDuration ago"
-
-	anInteger < 1 ifTrue: [ ^ self error: 'a rate that lets nothing out would stop the queue' ].
-	rateLimit := anInteger.
-	ratePeriod := aDuration
-]
-
-{ #category : #lanes }
-SoilQueueDescription >> rateLimit: anInteger per: aDuration forLane: aSymbol [
-
-	anInteger < 1 ifTrue: [ ^ self error: 'a rate that lets nothing out would stop the lane' ].
-	(self valuesForLane: aSymbol) at: #rate put: anInteger -> aDuration
-]
-
-{ #category : #rate }
-SoilQueueDescription >> ratePeriod [
-	"the length of the period #rateLimit counts in"
-
-	^ ratePeriod
-]
-
 { #category : #initialization }
 SoilQueueDescription >> setName: aSymbol workspace: aQueueWorkspace [
 
@@ -282,7 +242,7 @@ SoilQueueDescription >> workerLimit [
 	unless the embedder says otherwise, and that is the cautious direction: in Pharo
 	processes are green threads, so more of them buy overlap during waiting and latency
 	isolation between a long entry and a short one, never throughput. Against a backlog
-	the answer is a different rate, not more workers."
+	more workers are no answer."
 
 	^ workerLimit ifNil: [ 1 ]
 ]

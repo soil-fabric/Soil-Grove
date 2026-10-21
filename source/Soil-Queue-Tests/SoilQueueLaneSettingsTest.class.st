@@ -41,37 +41,10 @@ SoilQueueLaneSettingsTest >> inTransaction: aBlock [
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
 ]
 
-{ #category : #helpers }
-SoilQueueLaneSettingsTest >> leftIn: aSymbol [
-
-	| txn count |
-	txn := soil newTransaction.
-	count := 0.
-	[ | workspace |
-	  workspace := self workspaceIn: txn.
-	  workspace keysAndEntriesIn: (workspace laneNamed: aSymbol) do: [ :key :entry | count := count + 1 ] ]
-		ensure: [ txn abort ].
-	^ count
-]
-
 { #category : #accessing }
 SoilQueueLaneSettingsTest >> path [
 
 	^ 'soil-queue-lane-settings-tests'
-]
-
-{ #category : #helpers }
-SoilQueueLaneSettingsTest >> put: anInteger into: aSymbol [
-
-	self inTransaction: [ :txn |
-		| workspace |
-		workspace := self workspaceIn: txn.
-		anInteger timesRepeat: [
-			workspace
-				add: ((SoilQueueTestEntry on: 'work')
-					readyAt: clock now;
-					yourself)
-				to: (workspace laneNamed: aSymbol) ] ]
 ]
 
 { #category : #helpers }
@@ -114,26 +87,10 @@ SoilQueueLaneSettingsTest >> tearDown [
 ]
 
 { #category : #tests }
-SoilQueueLaneSettingsTest >> testALaneRunsAtItsOwnRate [
-
-	| queue |
-	self configure: [ :description | description rateLimit: 1 per: 1 minute forLane: #b ].
-	self put: 3 into: #default.
-	self put: 3 into: #b.
-	queue := self queue.
-	(SoilQueueWorker on: queue lane: (queue lane: #default)) run.
-	(SoilQueueWorker on: queue lane: (queue lane: #b)) run.
-
-	self assert: (self leftIn: #default) equals: 0.
-	self assert: (self leftIn: #b) equals: 2
-]
-
-{ #category : #tests }
 SoilQueueLaneSettingsTest >> testALaneSettingIsCheckedWhenItIsSet [
 	"not at the next start, where it would stop the resident from coming up"
 
 	self configure: [ :description |
-		self should: [ description rateLimit: 0 per: 1 minute forLane: #b ] raise: Error.
 		self should: [ description failureRetryLimit: -1 forLane: #b ] raise: Error.
 		self should: [ description orphanedRetryLimit: -1 forLane: #b ] raise: Error.
 		self should: [ description workerPool: #b size: 0 ] raise: Error ]
@@ -192,10 +149,4 @@ SoilQueueLaneSettingsTest >> testWithoutAPoolNamedALaneSharesTheDefault [
 	queue := self queue.
 	self assert: (queue lane: #b) pool identicalTo: (queue lane: #default) pool.
 	self assert: queue pools size equals: 1
-]
-
-{ #category : #helpers }
-SoilQueueLaneSettingsTest >> workspaceIn: aTransaction [
-
-	^ (self descriptionIn: aTransaction) workspace
 ]

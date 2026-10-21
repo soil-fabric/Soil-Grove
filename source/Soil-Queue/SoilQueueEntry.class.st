@@ -15,11 +15,11 @@ the whole graph together with me.
 I carry no field for my queue. Which queue I am on follows from the queue I lie in,
 and a second source for the same fact is a duplicate that can disagree.
 
-Two of my fields end up in my key rather than only on me. #readyAt is the sort
-value, and it is a lower bound and not an appointment -- I am allowed to run from then
-on, not scheduled for then, because a rate at the outlet can hold me back arbitrarily
-long. #id is what makes the key unique, which the index needs: moving a key is refused
-on an index with duplicate keys, and moving a key is what backoff does.
+Two of my fields end up in my key rather than only on me. #readyAt is the sort value,
+and it is a lower bound and not an appointment -- I am allowed to run from then on, not
+scheduled for then, because the workers of my lane can all be busy for arbitrarily long.
+#id is what makes the key unique, which the index needs: moving a key is refused on an
+index with duplicate keys, and moving a key is what backoff does.
 
 On a grouped lane it is #groupId instead of #readyAt that ends up in the key: my
 group, then my place in it, then #id. #readyAt stays with me there and is read from
@@ -157,9 +157,9 @@ SoilQueueEntry >> compensateIn: aTransaction [
 
 { #category : #accessing }
 SoilQueueEntry >> readyAt [
-	"the time from which I may run. A lower bound, not an appointment: a rate at the outlet
-	can hold me back arbitrarily long after it, and that is not a broken promise, because
-	no promise about a point in time was made.
+	"the time from which I may run. A lower bound, not an appointment: busy workers can hold
+	me back arbitrarily long after it, and that is not a broken promise, because no promise
+	about a point in time was made.
 
 	Nil until I am put into a queue unless my creator set one: the queue says 'now' then,
 	because what sorts me is the time I was put in, not the time I was made"

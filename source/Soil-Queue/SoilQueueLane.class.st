@@ -1,34 +1,30 @@
 "
-The live half of a lane: how fast it runs, and what it decides about its entries.
+The live half of a lane: what it decides about its entries.
 
-A lane is a place the queue hands entries out from, with a pace of its own -- a rate, a
-retry budget, a backoff -- and a worker pool it draws its workers from, which it may share
-with other lanes. Its stored half, SoilQueueLaneDescription, lies in the workspace
-and says where its entries are; I say how they go out. The queue builds me from both when
+A lane is a place the queue hands entries out from, with a retry budget and a backoff of
+its own, and a worker pool it draws its workers from, which it may share with other
+lanes. Its stored half, SoilQueueLaneDescription, lies in the workspace and says where
+its entries are; I say how they are tried again. The queue builds me from both when
 it is created and again at every start, and after that nobody reads the configuration
 for me: a changed setting holds from the next start on, the way it does for a resident.
 Without a resident, whoever creates the queue sets my values in code.
 
 What I decide: whether an entry may be tried once more after a failure or after losing
-its worker, how long it waits before the next try, and whether the rate lets one more
-go out now. What went out lately I count myself, one counter per lane -- two lanes with
-two rates must not share a count.
+its worker, and how long it waits before the next try.
 
-I am asked under the queue's mutex, like everything competing workers meet at, and I am
-never stored.
+My values are only read once the queue runs, so asking me needs no lock. The one thing
+of mine that changes, the key handed out last, is read and written under the queue's
+mutex, where competing workers meet. I am never stored.
 "
 Class {
 	#name : #SoilQueueLane,
 	#superclass : #Object,
 	#instVars : [
 		'name',
-		'rateLimit',
-		'ratePeriod',
 		'failureRetryLimit',
 		'orphanedRetryLimit',
 		'backoffBase',
 		'backoffCap',
-		'rateCounter',
 		'pool',
 		'lastIssuedKey'
 	],
@@ -101,8 +97,6 @@ SoilQueueLane >> configureFrom: aDescription [
 	and at every start -- and only then. Another lane answers the same, which is how a lane
 	added to a running queue starts out like the default lane"
 
-	rateLimit := aDescription rateLimit.
-	ratePeriod := aDescription ratePeriod.
 	failureRetryLimit := aDescription failureRetryLimit.
 	orphanedRetryLimit := aDescription orphanedRetryLimit.
 	backoffBase := aDescription backoffBase.
@@ -121,13 +115,6 @@ SoilQueueLane >> failureRetryLimit: anInteger [
 	anInteger < 0 ifTrue: [
 		^ self error: 'a negative number of retries cannot be used up' ].
 	failureRetryLimit := anInteger
-]
-
-{ #category : #initialization }
-SoilQueueLane >> initialize [
-
-	super initialize.
-	rateCounter := SoilQueueRateCounter new
 ]
 
 { #category : #accessing }
@@ -149,15 +136,6 @@ SoilQueueLane >> lastIssuedKey: anIndexKey [
 SoilQueueLane >> name [
 
 	^ name
-]
-
-{ #category : #rate }
-SoilQueueLane >> noteIssueAt: aDateAndTime [
-	"an entry went out, and counts against my rate for its period. Nothing to count without
-	a rate"
-
-	rateLimit ifNil: [ ^ self ].
-	rateCounter noteIssueAt: aDateAndTime
 ]
 
 { #category : #retrying }
@@ -192,49 +170,6 @@ SoilQueueLane >> printOn: aStream [
 
 	super printOn: aStream.
 	aStream << ' ' << name
-]
-
-{ #category : #rate }
-SoilQueueLane >> rateAllowanceAt: aDateAndTime ifNone: aBlock [
-	"how many entries my rate lets out at aDateAndTime -- or what aBlock answers when I have
-	no rate, since then the bound is somebody else's"
-
-	^ rateLimit
-		ifNil: [ aBlock value ]
-		ifNotNil: [ :limit |
-			rateCounter allowanceAt: aDateAndTime limit: limit period: ratePeriod ]
-]
-
-{ #category : #rate }
-SoilQueueLane >> rateFreeAt: aDateAndTime [
-	"from when my rate lets the next entry out: aDateAndTime itself when it has room, and
-	always without a rate"
-
-	^ rateLimit
-		ifNil: [ aDateAndTime ]
-		ifNotNil: [ :limit |
-			rateCounter freeAt: aDateAndTime limit: limit period: ratePeriod ]
-]
-
-{ #category : #rate }
-SoilQueueLane >> rateLimit [
-
-	^ rateLimit
-]
-
-{ #category : #rate }
-SoilQueueLane >> rateLimit: anInteger per: aDuration [
-	"no more than anInteger entries handed out in any period of aDuration"
-
-	anInteger < 1 ifTrue: [ ^ self error: 'a rate that lets nothing out would stop the lane' ].
-	rateLimit := anInteger.
-	ratePeriod := aDuration
-]
-
-{ #category : #rate }
-SoilQueueLane >> ratePeriod [
-
-	^ ratePeriod
 ]
 
 { #category : #retrying }
