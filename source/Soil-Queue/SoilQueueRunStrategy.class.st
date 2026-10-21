@@ -8,9 +8,9 @@ moment an embedder decides the database is quiet enough to close. The steps read
 they leave behind what they found.
 
 The sleep is a timed wait on the resident's work signal, so everything that signals it
-ends it early: new work, a stop, a worker that found an earlier due time. After each
-wake-up I look again rather than step, because a signal only says that something
-happened -- a stop wants no step, and an earlier due time wants a shorter sleep.
+ends it early: new work, a stop, a worker that ended, a tick. After each wake-up I look
+again rather than step, because a signal only says that something happened -- a stop wants
+no step, and a tick only has me look at the time again.
 "
 Class {
 	#name : #SoilQueueRunStrategy,

@@ -45,13 +45,19 @@ SoilQueueWorkerLimitTest >> path [
 { #category : #helpers }
 SoilQueueWorkerLimitTest >> put: anInteger into: aSymbol [
 
+	self put: anInteger into: aSymbol dueAt: clock now
+]
+
+{ #category : #helpers }
+SoilQueueWorkerLimitTest >> put: anInteger into: aSymbol dueAt: aDateAndTime [
+
 	self inTransaction: [ :txn |
 		| workspace |
 		workspace := self workspaceIn: txn.
 		anInteger timesRepeat: [
 			workspace
 				add: ((SoilQueueTestEntry on: 'work')
-					readyAt: clock now;
+					readyAt: aDateAndTime;
 					yourself)
 				to: (workspace laneNamed: aSymbol) ] ]
 ]
@@ -105,6 +111,40 @@ SoilQueueWorkerLimitTest >> tearDown [
 ]
 
 { #category : #tests }
+SoilQueueWorkerLimitTest >> testALaneFullOfDueWorkDoesNotHideTheTimeOfAnother [
+	"#a has more due than its one place, #b something an hour from now. Taken together the
+	earliest time was 'now', which is no time to wake at, and the hour of #b was lost with
+	it: nothing would have woken the dispatcher for #b"
+
+	| queue |
+	self put: 3 into: #a.
+	self put: 1 into: #b dueAt: clock now + 1 hour.
+	queue := self queue.
+	queue runStep.
+
+	self assert: (self startedFor: #a in: queue) equals: 1.
+	self assert: (self startedFor: #b in: queue) equals: 0.
+	self assert: queue wakeAt equals: clock now + 1 hour
+]
+
+{ #category : #tests }
+SoilQueueWorkerLimitTest >> testAKeyThatIsOutAsksForNoWorker [
+	"a worker is on it already. Two due, one of them out with the one worker running: the
+	step starts one more, for the other, and not two"
+
+	| queue running |
+	self put: 2 into: #a.
+	queue := self queue.
+	(queue lane: #a) workerLimit: 3.
+	running := SoilQueueWorker on: queue lane: (queue lane: #a).
+	queue workerStarting: running.
+	self assert: (queue assignNextIn: (queue lane: #a)) notNil.
+	queue runStep.
+
+	self assert: (self startedFor: #a in: queue) equals: 2
+]
+
+{ #category : #tests }
 SoilQueueWorkerLimitTest >> testALaneIsNotCrowdedOutByAnother [
 	"the reason the places are a lane's own: a lane full of due work cannot take the places
 	another lane needs"
@@ -118,6 +158,46 @@ SoilQueueWorkerLimitTest >> testALaneIsNotCrowdedOutByAnother [
 
 	self assert: (self startedFor: #a in: queue) equals: 2.
 	self assert: (self startedFor: #b in: queue) equals: 1
+]
+
+{ #category : #tests }
+SoilQueueWorkerLimitTest >> testAWorkerThatEndsInAStopRaisesNoFlag [
+	"it ended because the queue stopped handing out. A flag raised now would stay up, with
+	no dispatcher left to take it down, and a stopped queue would never be quiet"
+
+	| queue |
+	self put: 1 into: #a.
+	queue := self queue.
+	queue requestStop.
+	(SoilQueueWorker on: queue lane: (queue lane: #a)) run.
+
+	self deny: queue hasPendingWork.
+	self assert: queue basicIsIdle
+]
+
+{ #category : #tests }
+SoilQueueWorkerLimitTest >> testAWorkerThatEndsLetsTheNextStepStartAnother [
+	"the one place of #a is taken by a worker that is running dry: its last empty look began
+	before the entry came in. The step in between finds no place free, and nothing is due
+	later. What brings the next step is the worker's end, and that step starts a worker for
+	the entry. Before, nothing did, and the entry waited for whatever came next.
+
+	The ending worker is one of a lane from before a start: counted by its lane's name,
+	handed nothing, because its lane is not one the queue hands out from"
+
+	| queue ending |
+	queue := self queue.
+	ending := SoilQueueWorker on: queue lane: (SoilQueueLane named: #a).
+	queue workerStarting: ending.
+	self put: 1 into: #a.
+	queue runStep.
+	self assert: (self startedFor: #a in: queue) equals: 1.
+	self deny: queue runStrategy isDue.
+
+	ending run.
+	self assert: queue runStrategy isDue.
+	queue runStep.
+	self assert: (self startedFor: #a in: queue) equals: 2
 ]
 
 { #category : #tests }

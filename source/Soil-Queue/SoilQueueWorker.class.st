@@ -76,10 +76,21 @@ SoilQueueWorker >> processName [
 { #category : #running }
 SoilQueueWorker >> run [
 	"my whole life: entries until none comes any more. Ending is how a stop reaches me --
-	the queue stops handing out and I run dry"
+	the queue stops handing out and I run dry.
+
+	Ending is also what I tell the queue, as work for its dispatcher. My place is free
+	again, something may have come in while I was still counted -- an entry committed after
+	my last empty look began, which the step in between found no place for -- and when the
+	next entry falls due is the step's to read. I hand nothing on myself.
+
+	Not while the queue is stopping: then I ended because it stopped handing out, there is
+	no step to take, and a flag raised after the dispatcher has left would stay up -- the
+	queue would never say it is quiet again until it is started anew"
 
 	[ [ self runOnce notNil ] whileTrue ]
-		ensure: [ queue workerFinished: self ]
+		ensure: [
+			queue workerFinished: self.
+			queue shouldStop ifFalse: [ queue noteWork ] ]
 ]
 
 { #category : #running }

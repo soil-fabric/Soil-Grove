@@ -175,18 +175,22 @@ SoilQueueWorkspace >> defaultLane [
 ]
 
 { #category : #accessing }
-SoilQueueWorkspace >> dueCountAt: aDateAndTime in: aLaneDescription upTo: aLimit [
-	"how many entries of a lane are due, counted no further than aLimit.
+SoilQueueWorkspace >> dueAt: aDateAndTime in: aLaneDescription skipping: aCollection upTo: aLimit do: aBlock [
+	"how many entries of a lane are due, leaving out the keys in aCollection and counting no
+	further than aLimit, and when the next one after aDateAndTime falls due -- both handed to
+	aBlock, from one read.
 
-	The number is only ever used to decide how many workers to have, so counting past the
+	The number is only ever used to decide how many workers to start, so counting past the
 	limit would buy nothing. How the lane is walked for it is its format's to say"
 
-	aLimit < 1 ifTrue: [ ^ 0 ].
+	aLimit < 1 ifTrue: [ ^ aBlock value: 0 value: nil ].
 	^ aLaneDescription format
-		dueCountIn: aLaneDescription
+		dueIn: aLaneDescription
 		of: self
 		at: aDateAndTime
+		skipping: aCollection
 		upTo: aLimit
+		do: aBlock
 ]
 
 { #category : #accessing }

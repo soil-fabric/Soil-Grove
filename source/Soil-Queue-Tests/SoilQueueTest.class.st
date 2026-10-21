@@ -122,11 +122,11 @@ SoilQueueTest >> testATakenEntryComesBackAfterItIsReleased [
 	queue := self queue.
 
 	txn := soil newTransaction.
-	queue assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
+	queue assignNextDueAt: DateAndTime now in: txn.
 	self assert: (queue isHolding: key).
 	queue release: key.
 	self deny: (queue isHolding: key).
-	again := queue assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
+	again := queue assignNextDueAt: DateAndTime now in: txn.
 	txn abort.
 
 	self assert: again equals: key
@@ -151,8 +151,8 @@ SoilQueueTest >> testAWorkUnitClaimsBeforeItWorks [
 { #category : #tests }
 SoilQueueTest >> testAWorkerKeepsGoingUntilNothingComes [
 	"one entry is one work unit, and the worker asks again rather than waiting to be told.
-	Otherwise a queue would work one entry and then wait for a signal nobody sends, because
-	the one that announced the second entry was spent on the first"
+	Otherwise every further entry would cost a worker that ends and a step that starts the
+	next one, because the signal that announced the second entry was spent on the first"
 
 	| first second |
 	first := self put: (self entryDueIn: 0 seconds).
@@ -179,8 +179,8 @@ SoilQueueTest >> testAnEntryIsHandedOutOnlyOnce [
 	queue := self queue.
 
 	txn := soil newTransaction.
-	first := queue assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
-	second := queue assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
+	first := queue assignNextDueAt: DateAndTime now in: txn.
+	second := queue assignNextDueAt: DateAndTime now in: txn.
 	txn abort.
 
 	self assert: first notNil.
@@ -245,8 +245,8 @@ SoilQueueTest >> testTwoQueuesOnOneDescriptionDoNotKnowOfEachOther [
 	self deny: one == other.
 
 	txn := soil newTransaction.
-	first := one assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
-	second := other assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
+	first := one assignNextDueAt: DateAndTime now in: txn.
+	second := other assignNextDueAt: DateAndTime now in: txn.
 	txn abort.
 
 	self assert: first equals: second

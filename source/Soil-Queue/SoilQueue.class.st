@@ -137,14 +137,13 @@ SoilQueue >> addLane: aSymbol format: aFormat [
 ]
 
 { #category : #working }
-SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction ifNone: aBlock [
+SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction [
 	"the same for my first lane"
 
 	^ self
 		assignNextIn: self defaultLane
 		dueAt: aDateAndTime
 		in: aTransaction
-		ifNone: aBlock
 ]
 
 { #category : #working }
@@ -158,15 +157,14 @@ SoilQueue >> assignNextIn: aLane [
 	half-written state and held locks behind.
 
 	A worker that hears nil ends, and whatever is due later is the dispatcher's again. The
-	scan that found nothing due found the next due time on its way, so that is handed to the
-	dispatcher here -- otherwise an entry pushed out to later by the work unit that just
-	ran would wake nobody."
+	worker hands nothing on: its end is a signal (SoilQueueWorker>>#run), and the step that
+	brings reads when the next entry falls due."
 
 	^ self assignNextIn: aLane preferring: nil
 ]
 
 { #category : #working }
-SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aBlock [
+SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction [
 	"the same with no key to carry on from"
 
 	^ self
@@ -174,7 +172,6 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction ifNone: aB
 		dueAt: aDateAndTime
 		preferring: nil
 		in: aTransaction
-		ifNone: aBlock
 ]
 
 { #category : #working }
@@ -185,31 +182,26 @@ SoilQueue >> assignNextIn: aLane preferring: aKey [
 
 	self shouldStop ifTrue: [ ^ nil ].
 	^ self withTransactionDo: [ :txn |
-		self assignNextIn: aLane dueAt: self now preferring: aKey in: txn ifNone: [ :time |
-			time ifNotNil: [ self noteNextDueAt: time ].
-			nil ] ]
+		self assignNextIn: aLane dueAt: self now preferring: aKey in: txn ]
 ]
 
 { #category : #working }
-SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTransaction ifNone: aBlock [
-	"hand out the next due entry of aLane that nobody else holds, and remember that it is
-	out. On a lane ordered by due time that is the oldest due one; on a grouped lane the
-	first of a group, preferring the group of aKey -- the entry the asking worker did last --
-	and otherwise taking the groups in turn from behind the one handed out last.
+SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTransaction [
+	"hand out the next due entry of aLane that nobody else holds, remember that it is out,
+	and answer its key -- or nil when nothing of aLane is due. On a lane ordered by due time
+	that is the oldest due one; on a grouped lane the first of a group, preferring the group
+	of aKey -- the entry the asking worker did last -- and otherwise taking the groups in
+	turn from behind the one handed out last.
 
 	Under the mutex, because this is where competing workers meet. What crosses the
 	boundary is a key: the transaction this scanned in is not the one the work happens in.
 
 	Nothing goes out for a lane that has been removed; a worker the dispatcher started for it
-	just before runs dry.
+	just before runs dry."
 
-	When nothing is due, aBlock hears the due time of the next entry -- so the worker that
-	runs dry hands that on as the wake time."
-
-	| key nextTime |
-	key := mutex critical: [
+	^ mutex critical: [
 		| workspace found |
-		(lanes includes: aLane) ifFalse: [ ^ aBlock cull: nil ].
+		(lanes includes: aLane) ifFalse: [ ^ nil ].
 		workspace := self workspaceIn: aTransaction.
 		found := workspace
 			nextDueAt: aDateAndTime
@@ -217,12 +209,11 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTrans
 			skipping: inFlight
 			preferring: aKey
 			after: aLane lastIssuedKey
-			ifNone: [ :time | nextTime := time. nil ].
+			ifNone: [ nil ].
 		found ifNotNil: [
 			inFlight add: found.
 			aLane lastIssuedKey: found ].
-		found ].
-	^ key ifNil: [ aBlock cull: nextTime ]
+		found ]
 ]
 
 { #category : #testing }
@@ -243,7 +234,7 @@ SoilQueue >> book: anError for: aKey [
 
 	Put off: #failureRetries goes up, the due time moves out by the delay the entry asks
 	for, and the key moves with it -- the dispatcher reads the next wake time off the
-	ordering, and the worker that runs dry hands it on. Given up: the entry gets to say so
+	ordering, at the step the end of the worker brings. Given up: the entry gets to say so
 	to its target (#giveUp:in:), and is done. A failure the entry cannot get past is a
 	result, not a dead letter; that one is kept for entries nobody could get to at all.
 
@@ -332,9 +323,10 @@ SoilQueue >> defaultLane [
 { #category : #waking }
 SoilQueue >> forgetWakeTime [
 	"at the start of a step, which reads the ordering afresh. A wake time that has passed
-	would otherwise stay behind and have the dispatcher step, and step again"
+	would otherwise stay behind if the step does not get to set a new one, and have the
+	dispatcher step, and step again"
 
-	mutex critical: [ wakeAt := nil ]
+	wakeAt := nil
 ]
 
 { #category : #running }
@@ -427,20 +419,6 @@ SoilQueue >> nextDueTime [
 
 	^ self withTransactionDo: [ :txn |
 		(self workspaceIn: txn) nextDueTimeAt: self now ]
-]
-
-{ #category : #waking }
-SoilQueue >> noteNextDueAt: aDateAndTime [
-	"something falls due at aDateAndTime, and the dispatcher has to be awake by then. The
-	earlier of two times wins: a later one does not make an earlier entry any less due.
-	The dispatcher is signalled but not handed a flag, because nothing is due yet -- it
-	only has to measure its sleep again"
-
-	mutex critical: [
-		wakeAt := wakeAt
-			ifNil: [ aDateAndTime ]
-			ifNotNil: [ :current | current min: aDateAndTime ] ].
-	self wakeUp
 ]
 
 { #category : #accessing }
@@ -558,32 +536,6 @@ SoilQueue >> release: aKey [
 	mutex critical: [ inFlight remove: aKey ifAbsent: [ nil ] ]
 ]
 
-{ #category : #waking }
-SoilQueue >> rememberNextDueTime [
-	"the last thing a step does: read when the first entry of each lane falls due, and keep
-	the earliest. Only a time still to come is a wake time. One that has come is the
-	workers' business -- they are running for it, and the last of them to run dry hands on
-	what it found."
-
-	| time |
-	time := self withTransactionDo: [ :txn |
-		| workspace now |
-		workspace := self workspaceIn: txn.
-		now := self now.
-		lanes
-			inject: nil
-			into: [ :earliest :lane |
-				(workspace nextDueTimeAt: now in: (workspace laneNamed: lane name))
-					ifNil: [ earliest ]
-					ifNotNil: [ :due |
-						earliest ifNil: [ due ] ifNotNil: [ earliest min: due ] ] ] ].
-	(time notNil and: [ time > self now ]) ifFalse: [ ^ self ].
-	mutex critical: [
-		wakeAt := wakeAt
-			ifNil: [ time ]
-			ifNotNil: [ :current | current min: time ] ]
-]
-
 { #category : #lanes }
 SoilQueue >> removeLane: aSymbol [
 	"take out a lane that has nothing left in it"
@@ -630,13 +582,13 @@ SoilQueue >> runStep [
 	handing out, the wake time and the idle answer along with it, for as long as that unit
 	takes.
 
-	What it decides is how many workers there should be, never who gets what -- that is
-	the queue's own, under the mutex, because that is where competing workers meet."
+	What it decides is how many workers there should be and when to be awake next, never
+	who gets what -- that is the queue's own, under the mutex, because that is where
+	competing workers meet. The wake time is set here and nowhere else."
 
 	self forgetWakeTime.
 	self recoverOrphanedClaims.
-	self startWorkersForWhatIsDue.
-	self rememberNextDueTime
+	self startWorkersForWhatIsDue
 ]
 
 { #category : #accessing }
@@ -659,34 +611,56 @@ SoilQueue >> startWorkerFor: aLane [
 
 { #category : #running }
 SoilQueue >> startWorkersForWhatIsDue [
-	"as many workers as there is due work for, lane by lane, up to the limit, and nothing on
-	stock.
+	"as many workers as there is due work for, lane by lane, up to the places a lane has
+	free, and nothing on stock -- and when the dispatcher has to be awake next. Both from one
+	read of each lane, in one transaction for all of them, and this is the one place the
+	wake time is set.
 
-	The count stops at the limit and at the first entry that is not due, so the scan costs
-	the same whether ten entries are waiting or ten thousand. The number of waiting entries
-	says nothing about how many workers are needed anyway -- it only says how long the
-	working takes.
+	The count leaves out the keys that are out, since a worker is on them already, and stops
+	at the places free -- on a lane ordered by due time also at the first entry that is not
+	due, so the read costs the same whether ten entries are waiting or ten thousand; a
+	grouped lane looks at each group once. The number of waiting entries says nothing about
+	how many workers are needed anyway -- it only says how long the working takes.
 
-	Every worker takes a place under the limit of its lane, and a lane gets no more than it
-	has free; lanes share no places. A lane that already has workers running gets that many
-	fewer new ones."
+	Only a time still to come is a wake time, and a lane offers one only when its due work
+	does not fill its free places. Due work is the workers' business: they are running for
+	it, and a worker that ends signals, which brings the next step. So a lane full of due
+	work does not hide the later time of another, and a lane with no place free is not read
+	at all. The workers are started after the read, outside its transaction.
 
+	The lanes and the keys that are out are taken before the transaction opens. Soil fixes
+	what a transaction sees when it opens, and a lane is added to the workspace first and
+	to my lanes second: taken in this order, every lane I read is one the transaction sees."
+
+	| current held wanted time |
 	self shouldStop ifTrue: [ ^ self ].
-	lanes do: [ :lane |
-		| free |
-		free := self freePlacesIn: lane.
-		free > 0 ifTrue: [
-			| wanted running |
-			wanted := self withTransactionDo: [ :txn |
-				| workspace now |
-				workspace := self workspaceIn: txn.
-				now := self now.
-				workspace
-					dueCountAt: now
-					in: (workspace laneNamed: lane name)
-					upTo: lane workerLimit ].
-			running := mutex critical: [ workers count: [ :each | each lane name = lane name ] ].
-			((wanted - running) min: free) timesRepeat: [ self startWorkerFor: lane ] ] ]
+	current := lanes.
+	held := mutex critical: [ inFlight copy ].
+	wanted := OrderedCollection new.
+	time := self withTransactionDo: [ :txn |
+		| workspace now |
+		workspace := self workspaceIn: txn.
+		now := self now.
+		current
+			inject: nil
+			into: [ :earliest :lane |
+				| free |
+				free := self freePlacesIn: lane.
+				free > 0
+					ifFalse: [ earliest ]
+					ifTrue: [
+						workspace
+							dueAt: now
+							in: (workspace laneNamed: lane name)
+							skipping: held
+							upTo: free
+							do: [ :count :next |
+								wanted add: lane -> count.
+								(next isNil or: [ earliest notNil and: [ earliest <= next ] ])
+									ifTrue: [ earliest ]
+									ifFalse: [ next ] ] ] ] ].
+	wakeAt := time.
+	wanted do: [ :each | each value timesRepeat: [ self startWorkerFor: each key ] ]
 ]
 
 { #category : #working }
@@ -743,9 +717,11 @@ SoilQueue >> timeUntilWake [
 SoilQueue >> wakeAt [
 	"when the dispatcher has to be awake because an entry falls due, or nil when nothing
 	is known to fall due. Kept in memory and nowhere else: it is read between two steps,
-	where no transaction is open"
+	where no transaction is open. One writer, the dispatcher's own step, so no lock: a read
+	from elsewhere sees the time a step set, or nil while a step is between forgetting the
+	old one and setting the new one"
 
-	^ mutex critical: [ wakeAt ]
+	^ wakeAt
 ]
 
 { #category : #working }

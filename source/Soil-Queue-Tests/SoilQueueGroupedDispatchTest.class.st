@@ -139,6 +139,7 @@ SoilQueueGroupedDispatchTest >> testAFirstEntryThatIsNotDueHoldsUpItsGroupOnly [
 	queue := self queue.
 	self assert: (self assign: queue) equals: other first.
 	self assert: (self assign: queue) equals: nil.
+	queue runStep.
 	self assert: queue wakeAt equals: clock now + 1 hour
 ]
 
@@ -155,6 +156,20 @@ SoilQueueGroupedDispatchTest >> testAWorkerCarriesOnWithItsOwnGroup [
 	self assert: first equals: seven first.
 	self finish: first in: queue.
 	self assert: (self assign: queue preferring: first) equals: seven second
+]
+
+{ #category : #tests }
+SoilQueueGroupedDispatchTest >> testAGroupWhoseFirstEntryIsOutAsksForNoWorker [
+	"its next entry must not overtake the one that is out, so the group has nothing to go,
+	however much of it is due"
+
+	| queue |
+	self put: 3 into: 7.
+	queue := self queue.
+	self assert: (self assign: queue) notNil.
+	queue runStep.
+
+	self assert: queue started isEmpty
 ]
 
 { #category : #tests }
@@ -210,6 +225,22 @@ SoilQueueGroupedDispatchTest >> testOnlyTheFirstEntryOfAGroupGoesOut [
 	queue := self queue.
 	self assert: (self assign: queue) equals: keys first.
 	self assert: (self assign: queue) equals: nil
+]
+
+{ #category : #tests }
+SoilQueueGroupedDispatchTest >> testTheEarliestOfTheGroupsThatWaitIsTheWakeTime [
+	"every group is looked at, and the one that comes first in key order is not the one that
+	falls due first"
+
+	| queue |
+	self put: 1 into: 1 dueAt: clock now + 1 hour.
+	self put: 1 into: 2 dueAt: clock now + 10 minutes.
+	self put: 1 into: 3 dueAt: clock now + 30 minutes.
+	queue := self queue.
+	queue runStep.
+
+	self assert: queue started isEmpty.
+	self assert: queue wakeAt equals: clock now + 10 minutes
 ]
 
 { #category : #tests }
