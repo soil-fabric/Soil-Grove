@@ -1,9 +1,9 @@
 "
 The live half of a lane: what it decides about its entries.
 
-A lane is a place the queue hands entries out from, with a retry budget and a backoff of
-its own, and a worker pool it draws its workers from, which it may share with other
-lanes. Its stored half, SoilQueueLaneDescription, lies in the workspace and says where
+A lane is a place the queue hands entries out from, with a retry budget, a backoff and a
+worker limit of its own -- how many of its workers may run at once. Lanes share no
+places. Its stored half, SoilQueueLaneDescription, lies in the workspace and says where
 its entries are; I say how they are tried again. The queue builds me from both when
 it is created and again at every start, and after that nobody reads the configuration
 for me: a changed setting holds from the next start on, the way it does for a resident.
@@ -25,7 +25,7 @@ Class {
 		'orphanedRetryLimit',
 		'backoffBase',
 		'backoffCap',
-		'pool',
+		'workerLimit',
 		'lastIssuedKey'
 	],
 	#category : #'Soil-Queue'
@@ -100,7 +100,8 @@ SoilQueueLane >> configureFrom: aDescription [
 	failureRetryLimit := aDescription failureRetryLimit.
 	orphanedRetryLimit := aDescription orphanedRetryLimit.
 	backoffBase := aDescription backoffBase.
-	backoffCap := aDescription backoffCap
+	backoffCap := aDescription backoffCap.
+	workerLimit := aDescription workerLimit
 ]
 
 { #category : #retrying }
@@ -152,19 +153,6 @@ SoilQueueLane >> orphanedRetryLimit: anInteger [
 	orphanedRetryLimit := anInteger
 ]
 
-{ #category : #accessing }
-SoilQueueLane >> pool [
-	"the worker pool my workers take their places in"
-
-	^ pool
-]
-
-{ #category : #accessing }
-SoilQueueLane >> pool: aWorkerPool [
-
-	pool := aWorkerPool
-]
-
 { #category : #printing }
 SoilQueueLane >> printOn: aStream [
 
@@ -184,4 +172,19 @@ SoilQueueLane >> retryDelayAfter: anInteger [
 SoilQueueLane >> setName: aSymbol [
 
 	name := aSymbol
+]
+
+{ #category : #accessing }
+SoilQueueLane >> workerLimit [
+	"how many of my workers may run at once: the places I have. Mine alone -- a lane full
+	of due work cannot take the places another lane needs"
+
+	^ workerLimit
+]
+
+{ #category : #accessing }
+SoilQueueLane >> workerLimit: anInteger [
+
+	anInteger < 1 ifTrue: [ ^ self error: 'a lane with no place would never let a worker run' ].
+	workerLimit := anInteger
 ]

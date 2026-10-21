@@ -28,9 +28,9 @@ say -- I have no live lanes, and whoever asks for one hears that I am not starte
 Without a resident, whoever creates me on a workspace (#onWorkspace:in:) gets the lanes
 built right there and sets their values in code.
 
-Every lane draws its workers from a worker pool, a count of places; lanes may share one,
-and by default all of them do. Before I start a worker for a lane there has to be a place
-free in its pool -- if there is none, I start none and try again at the next wake.
+Every lane has a worker limit, a count of places of its own; lanes share no places.
+Before I start a worker for a lane there has to be a place free under its limit -- if
+there is none, I start none and try again at the next wake.
 
 Three roles, and the point of them is what each may not do. I hand out, and that is the
 only place an entry is chosen. My process is the dispatcher: a step decides how many
@@ -120,8 +120,8 @@ SoilQueue >> add: anEntry to: aLaneName in: aTransaction [
 SoilQueue >> addLane: aSymbol format: aFormat [
 	"a lane more, stored in my workspace under the next free marker and handed out from at
 	once -- a lane that took entries and handed nothing out until the next start would only
-	collect them. Until that start configures it, it runs like my default lane and draws
-	on its pool. Answers the live lane.
+	collect them. Until that start configures it, it takes the values of my default lane,
+	the worker limit among them -- but places of its own. Answers the live lane.
 
 	Not started, I have no live lanes to add it to, and I hand nothing out anyway: the lane
 	is only stored, the next start builds it with the others, and I answer nil"
@@ -131,9 +131,7 @@ SoilQueue >> addLane: aSymbol format: aFormat [
 		(self workspaceIn: txn) addLaneNamed: aSymbol format: aFormat.
 		txn commit ].
 	self hasLiveLanes ifFalse: [ ^ nil ].
-	lane := (SoilQueueLane named: aSymbol configuredFrom: self defaultLane)
-		pool: self defaultLane pool;
-		yourself.
+	lane := SoilQueueLane named: aSymbol configuredFrom: self defaultLane.
 	lanes := lanes copyWith: lane.
 	^ lane
 ]
@@ -297,24 +295,20 @@ SoilQueue >> clock: aClock [
 { #category : #configuring }
 SoilQueue >> configureFrom: aDescription in: aTransaction [
 	"build my lanes from the lanes stored in my workspace, each configured from
-	aDescription -- the values for all lanes first, then its own -- and drawing on the
-	worker pool named for it. Lanes named for one pool share one. Called at every start, and
-	only then: after that nobody reads the configuration for me. A queue without a resident
+	aDescription -- the values for all lanes first, then its own, its worker limit among
+	them. Called at every start, and only then: after that nobody reads the configuration
+	for me. A queue without a resident
 	is configured once, where it is created on its workspace.
 
 	The lanes are built anew, and with them the turn of a grouped lane: it begins at the
 	front again (#lastIssuedKey)"
 
-	| workspace pools |
+	| workspace |
 	workspace := self workspaceIn: aTransaction.
-	pools := Dictionary new.
 	lanes := workspace lanes collect: [ :each |
-		| lane poolName |
+		| lane |
 		lane := SoilQueueLane named: each name configuredFrom: aDescription.
 		aDescription configureLane: lane.
-		poolName := aDescription workerPoolForLane: each name.
-		lane pool: (pools at: poolName ifAbsentPut: [
-			SoilQueueWorkerPool named: poolName size: (aDescription sizeOfWorkerPool: poolName) ]).
 		lane ]
 ]
 
@@ -344,12 +338,12 @@ SoilQueue >> forgetWakeTime [
 ]
 
 { #category : #running }
-SoilQueue >> freePlacesIn: aWorkerPool [
-	"how many places of a pool are not taken, counted off the workers that are running --
+SoilQueue >> freePlacesIn: aLane [
+	"how many places of a lane are not taken, counted off the workers that are running --
 	by name, so that a worker of a lane from before a start still counts"
 
-	^ aWorkerPool size - (mutex critical: [
-		workers count: [ :each | each lane pool name = aWorkerPool name ] ])
+	^ aLane workerLimit - (mutex critical: [
+		workers count: [ :each | each lane name = aLane name ] ])
 ]
 
 { #category : #testing }
@@ -458,23 +452,6 @@ SoilQueue >> now [
 	^ clock
 		ifNil: [ DateAndTime now ]
 		ifNotNil: [ :aClock | aClock now ]
-]
-
-{ #category : #accessing }
-SoilQueue >> pool: aSymbol [
-	"the worker pool of that name, for whoever sets its size in code"
-
-	^ self pools
-		detect: [ :each | each name = aSymbol ]
-		ifNone: [ self error: 'no worker pool named ', aSymbol printString ]
-]
-
-{ #category : #accessing }
-SoilQueue >> pools [
-	"the worker pools my lanes draw on. There is no list of them besides: a pool no lane
-	draws on has nothing to count"
-
-	^ (lanes collect: [ :each | each pool ]) asIdentitySet asArray
 ]
 
 { #category : #running }
@@ -690,14 +667,14 @@ SoilQueue >> startWorkersForWhatIsDue [
 	says nothing about how many workers are needed anyway -- it only says how long the
 	working takes.
 
-	Every worker takes a place in the pool of its lane, and a lane gets no more than its
-	pool has free -- lanes that share a pool share its places. A lane that already has
-	workers running gets that many fewer new ones."
+	Every worker takes a place under the limit of its lane, and a lane gets no more than it
+	has free; lanes share no places. A lane that already has workers running gets that many
+	fewer new ones."
 
 	self shouldStop ifTrue: [ ^ self ].
 	lanes do: [ :lane |
 		| free |
-		free := self freePlacesIn: lane pool.
+		free := self freePlacesIn: lane.
 		free > 0 ifTrue: [
 			| wanted running |
 			wanted := self withTransactionDo: [ :txn |
@@ -707,7 +684,7 @@ SoilQueue >> startWorkersForWhatIsDue [
 				workspace
 					dueCountAt: now
 					in: (workspace laneNamed: lane name)
-					upTo: lane pool size ].
+					upTo: lane workerLimit ].
 			running := mutex critical: [ workers count: [ :each | each lane name = lane name ] ].
 			((wanted - running) min: free) timesRepeat: [ self startWorkerFor: lane ] ] ]
 ]
@@ -737,7 +714,7 @@ SoilQueue >> terminateProcesses [
 
 	self workers do: [ :each | each terminate ].
 	"nobody is left to take a place back. A worker that was terminated before its #run
-	began never reaches the end of it, and would be counted for ever -- with a pool of one
+	began never reaches the end of it, and would be counted for ever -- with a limit of one
 	place that is no worker at all, and a queue that never says it is quiet"
 	mutex critical: [ workers := IdentitySet new ].
 	super terminateProcesses

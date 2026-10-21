@@ -12,9 +12,8 @@ workspace by id.
 
 Every value is set for all lanes, and may be set for one lane in particular, by the
 same selector with forLane:. A lane takes what is set for it and the rest from what is set
-for all. Likewise every lane draws on the worker pool named for it, #default if none is:
-#default has the worker limit as its size, any other pool the size set by
-#workerPool:size:. Kept by lane name, since the lanes themselves are the workspace's.
+for all -- the worker limit as much as the retry budgets and the backoff. Kept by lane
+name, since the lanes themselves are the workspace's.
 
 The workspace is a cluster root of its own. I make it one in #initializeFrom:, which is
 where a description creates the objects its resident works on, and it makes the index
@@ -37,8 +36,7 @@ Class {
 		'failureRetryLimit',
 		'backoffBase',
 		'backoffCap',
-		'laneValues',
-		'poolSizes'
+		'laneValues'
 	],
 	#category : #'Soil-Queue'
 }
@@ -112,7 +110,8 @@ SoilQueueDescription >> configureLane: aLane [
 	values at: #failureRetryLimit ifPresent: [ :limit | aLane failureRetryLimit: limit ].
 	values at: #orphanedRetryLimit ifPresent: [ :limit | aLane orphanedRetryLimit: limit ].
 	values at: #backoffBase ifPresent: [ :duration | aLane backoffBase: duration ].
-	values at: #backoffCap ifPresent: [ :duration | aLane backoffCap: duration ]
+	values at: #backoffCap ifPresent: [ :duration | aLane backoffCap: duration ].
+	values at: #workerLimit ifPresent: [ :limit | aLane workerLimit: limit ]
 ]
 
 { #category : #retrying }
@@ -220,15 +219,6 @@ SoilQueueDescription >> setName: aSymbol workspace: aQueueWorkspace [
 ]
 
 { #category : #lanes }
-SoilQueueDescription >> sizeOfWorkerPool: aSymbol [
-	"how many places a pool has: #default has the worker limit, any other what it was set
-	to -- one if nothing was, the cautious direction, as for the worker limit"
-
-	aSymbol = #default ifTrue: [ ^ self workerLimit ].
-	^ (poolSizes ifNil: [ ^ 1 ]) at: aSymbol ifAbsent: [ 1 ]
-]
-
-{ #category : #lanes }
 SoilQueueDescription >> valuesForLane: aSymbol [
 	"what is set for that lane in particular, to be added to"
 
@@ -238,11 +228,11 @@ SoilQueueDescription >> valuesForLane: aSymbol [
 
 { #category : #accessing }
 SoilQueueDescription >> workerLimit [
-	"how many workers may run at once: the size of the worker pool all lanes share. One
-	unless the embedder says otherwise, and that is the cautious direction: in Pharo
-	processes are green threads, so more of them buy overlap during waiting and latency
-	isolation between a long entry and a short one, never throughput. Against a backlog
-	more workers are no answer."
+	"how many workers of a lane may run at once, for every lane that has no limit of its own
+	(#workerLimit:forLane:). One unless the embedder says otherwise, and that is the
+	cautious direction: in Pharo processes are green threads, so more of them buy overlap
+	during waiting and latency isolation between a long entry and a short one, never
+	throughput. Against a backlog more workers are no answer."
 
 	^ workerLimit ifNil: [ 1 ]
 ]
@@ -250,33 +240,16 @@ SoilQueueDescription >> workerLimit [
 { #category : #accessing }
 SoilQueueDescription >> workerLimit: anInteger [
 
-	anInteger < 1 ifTrue: [ ^ self error: 'a queue with no worker would never run' ].
+	anInteger < 1 ifTrue: [ ^ self error: 'a lane with no worker would never run' ].
 	workerLimit := anInteger
 ]
 
 { #category : #lanes }
-SoilQueueDescription >> workerPool: aPoolName forLane: aSymbol [
-	"the lane draws its workers from that pool. Lanes named for one pool share it; a lane
-	named for none draws on #default"
+SoilQueueDescription >> workerLimit: anInteger forLane: aSymbol [
+	"how many workers of that lane may run at once. Its places are its own: no other lane
+	takes them, and it takes none of theirs"
 
-	(self valuesForLane: aSymbol) at: #workerPool put: aPoolName
+	anInteger < 1 ifTrue: [ ^ self error: 'a lane with no worker would never run' ].
+	(self valuesForLane: aSymbol) at: #workerLimit put: anInteger
 ]
 
-{ #category : #lanes }
-SoilQueueDescription >> workerPool: aSymbol size: anInteger [
-	"how many workers of the lanes drawing on that pool may run at once. For #default that
-	is the worker limit"
-
-	aSymbol = #default ifTrue: [ ^ self workerLimit: anInteger ].
-	anInteger < 1 ifTrue: [ ^ self error: 'a pool with no place would never let a worker run' ].
-	poolSizes ifNil: [ poolSizes := Dictionary new ].
-	poolSizes at: aSymbol put: anInteger
-]
-
-{ #category : #lanes }
-SoilQueueDescription >> workerPoolForLane: aSymbol [
-	"the name of the pool that lane draws on"
-
-	^ ((laneValues ifNil: [ ^ #default ]) at: aSymbol ifAbsent: [ ^ #default ])
-		at: #workerPool ifAbsent: [ #default ]
-]

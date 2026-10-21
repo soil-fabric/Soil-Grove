@@ -2,8 +2,8 @@
 The description configures each lane: what is set for a lane holds for it, what is not
 comes from the values set for all lanes, and those from the defaults.
 
-The same for the worker pools. A lane draws on the pool named for it, lanes named for one
-pool share it, and a lane named for none draws on #default, the pool of the worker limit.
+The same for the worker limit. A lane has the one set for it, or the one set for all
+lanes, and one place if neither is set; lanes share no places.
 
 On a workspace with markers and a second lane, #b, registered as the resident #work.
 "
@@ -93,36 +93,22 @@ SoilQueueLaneSettingsTest >> testALaneSettingIsCheckedWhenItIsSet [
 	self configure: [ :description |
 		self should: [ description failureRetryLimit: -1 forLane: #b ] raise: Error.
 		self should: [ description orphanedRetryLimit: -1 forLane: #b ] raise: Error.
-		self should: [ description workerPool: #b size: 0 ] raise: Error ]
+		self should: [ description workerLimit: 0 forLane: #b ] raise: Error ]
 ]
 
 { #category : #tests }
-SoilQueueLaneSettingsTest >> testAnUnsizedPoolHasOnePlace [
-	"the cautious direction, as for the worker limit"
-
-	| queue |
-	self configure: [ :description | description workerPool: #slow forLane: #b ].
-	queue := self queue.
-	self assert: (queue lane: #b) pool name equals: #slow.
-	self assert: (queue lane: #b) pool size equals: 1
-]
-
-{ #category : #tests }
-SoilQueueLaneSettingsTest >> testLanesNamedForOnePoolShareIt [
+SoilQueueLaneSettingsTest >> testALaneTakesItsOwnWorkerLimit [
 
 	| queue |
 	self configure: [ :description |
 		description
 			workerLimit: 3;
-			workerPool: #side size: 2;
-			workerPool: #side forLane: #b;
-			workerPool: #side forLane: #c ].
+			workerLimit: 2 forLane: #b ].
 	queue := self queue.
 
-	self assert: (queue lane: #b) pool identicalTo: (queue lane: #c) pool.
-	self assert: (queue lane: #b) pool size equals: 2.
-	self assert: (queue lane: #default) pool name equals: #default.
-	self assert: (queue lane: #default) pool size equals: 3
+	self assert: (queue lane: #b) workerLimit equals: 2.
+	self assert: (queue lane: #c) workerLimit equals: 3.
+	self assert: (queue lane: #default) workerLimit equals: 3
 ]
 
 { #category : #tests }
@@ -143,10 +129,11 @@ SoilQueueLaneSettingsTest >> testWhatIsNotSetForALaneComesFromAllLanes [
 ]
 
 { #category : #tests }
-SoilQueueLaneSettingsTest >> testWithoutAPoolNamedALaneSharesTheDefault [
+SoilQueueLaneSettingsTest >> testWithoutALimitSetALaneHasOnePlace [
+	"the cautious direction, as for the worker limit of all lanes"
 
 	| queue |
 	queue := self queue.
-	self assert: (queue lane: #b) pool identicalTo: (queue lane: #default) pool.
-	self assert: queue pools size equals: 1
+	self assert: (queue lane: #b) workerLimit equals: 1.
+	self assert: (queue lane: #default) workerLimit equals: 1
 ]
