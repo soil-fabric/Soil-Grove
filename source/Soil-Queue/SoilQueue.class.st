@@ -184,8 +184,12 @@ SoilQueue >> assignNextIn: aLane preferring: aKey [
 	transaction sees when it opens, and a worker gives its entry back under the mutex after
 	its commit: opened before, the read could be older than the last give-back, still hold
 	an entry that is finished and gone, and find it no longer out -- it would be handed out
-	again, the claim would fail, and two step errors would be counted for nothing. Opening
-	a read costs no input or output, and no commit lies under the mutex; the mutex is
+	again, the claim would fail, and two step errors would be counted for nothing.
+
+	Opening a read reads the database version from Soil's control file: one small read,
+	and at worst a wait behind a commit that is writing it. The scan that follows reads
+	the index and the entries under the mutex anyway. What must not lie under it is a
+	commit, and none does: the claim is a transaction of its own, outside. The mutex is
 	reentrant, so the selection takes it again inside"
 
 	self shouldStop ifTrue: [ ^ nil ].

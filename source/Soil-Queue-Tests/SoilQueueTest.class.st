@@ -178,9 +178,11 @@ SoilQueueTest >> testAnEntryGivenBackMeanwhileIsNotHandedOutFromAnOlderRead [
 	is still out when it scans.
 
 	The other worker is a process of its own, as it is in a running queue, and it acts in
-	the gap between the opening of the read and what comes after it. While this worker
-	holds the mutex, the other cannot give the entry back; it waits a moment for that, and
-	the entry stays out"
+	the gap between the opening of the read and what comes after it, and it is given a
+	moment for that. While this worker holds the mutex, the other cannot give the entry
+	back, and the entry stays out. The moment is a delay and not a timed wait on a
+	semaphore: the selectors for that are not the same on every Pharo the queue is built
+	on"
 
 	| txn queue held next finished |
 	held := self put: (self entryDueIn: -1 seconds).
@@ -192,16 +194,13 @@ SoilQueueTest >> testAnEntryGivenBackMeanwhileIsNotHandedOutFromAnOlderRead [
 
 	finished := Semaphore new.
 	queue interleave: [
-		| givenBack |
-		givenBack := Semaphore new.
 		[ | other |
 		  other := soil newTransaction.
 		  (self workspaceIn: other) removeKey: held.
 		  other commit.
 		  queue release: held.
-		  givenBack signal.
 		  finished signal ] fork.
-		givenBack waitTimeoutMilliseconds: 300 ].
+		(Delay forMilliseconds: 300) wait ].
 
 	self assert: (queue assignNextIn: queue defaultLane) equals: next.
 	finished waitTimeoutSeconds: 5.
