@@ -13,8 +13,9 @@ never do that is to have no way to do it.
 
 Nothing about me is written down. The state that has to survive a crash sits on the entry
 -- it says claimed, and after a restart no worker holds it, which is exactly how an
-orphaned claim is recognised. What I carry is the other half of that: which entry is mine
-*now*, so the queue can tell a claim with a worker from a claim without one.
+orphaned claim is recognised. The other half of that is the queue's: the keys that are
+out (#isHolding:), from the moment one is handed to me until I give it back, so it can
+tell a claim with a worker from a claim without one.
 
 A work unit that throws does not take me down. It is counted on the queue and I go on to
 the next entry, because a transient failure must not cost a worker.
@@ -26,7 +27,6 @@ Class {
 		'queue',
 		'lane',
 		'process',
-		'currentKey',
 		'lastKey'
 	],
 	#category : #'Soil-Queue'
@@ -45,13 +45,6 @@ SoilQueueWorker class >> on: aQueue lane: aLane [
 	^ self new
 		setQueue: aQueue lane: aLane;
 		yourself
-]
-
-{ #category : #accessing }
-SoilQueueWorker >> currentKey [
-	"the entry I am on right now, or nil between two of them"
-
-	^ currentKey
 ]
 
 { #category : #testing }
@@ -109,15 +102,12 @@ SoilQueueWorker >> runOnce [
 	| key |
 	key := queue assignNextIn: lane preferring: lastKey.
 	key ifNil: [ ^ nil ].
-	currentKey := key.
 	lastKey := key.
 	[ [ queue claim: key.
 	    queue work: key ]
 		on: Error
 		do: [ :anError | queue stepFailed: anError on: key ] ]
-		ensure: [
-			currentKey := nil.
-			queue release: key ].
+		ensure: [ queue release: key ].
 	^ key
 ]
 
