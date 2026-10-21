@@ -44,13 +44,6 @@ SoilQueueLaneDescription >> includesKey: anIndexKey [
 ]
 
 { #category : #converting }
-SoilQueueLaneDescription >> keyFor: anEntry [
-	"the key for anEntry when my format needs nothing but the entry to build it"
-
-	^ self keyFor: anEntry in: nil
-]
-
-{ #category : #converting }
 SoilQueueLaneDescription >> keyFor: anEntry in: aQueueWorkspace [
 	"the chain: my format orders, and my section places the result -- marker first,
 	padding last, filling the whole key size. The workspace is there for a format that

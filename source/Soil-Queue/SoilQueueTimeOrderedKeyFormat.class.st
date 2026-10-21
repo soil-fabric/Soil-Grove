@@ -17,7 +17,7 @@ Class {
 }
 
 { #category : #converting }
-SoilQueueTimeOrderedKeyFormat >> appendKeyPartsFor: anEntry on: aWriteStream [
+SoilQueueTimeOrderedKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of: aQueueWorkspace on: aWriteStream [
 
 	aWriteStream
 		nextPutAll: ((self millisecondsOf: anEntry readyAt) asByteArrayOfSize: 8);
@@ -35,12 +35,6 @@ SoilQueueTimeOrderedKeyFormat >> millisecondsOf: aDateAndTime [
 	milliseconds < 0 ifTrue: [
 		^ self error: 'a due time before 1970 has no place in a key: ' , aDateAndTime printString ].
 	^ milliseconds
-]
-
-{ #category : #testing }
-SoilQueueTimeOrderedKeyFormat >> ordersByDueTime [
-
-	^ true
 ]
 
 { #category : #accessing }

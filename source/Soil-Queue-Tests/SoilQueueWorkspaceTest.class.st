@@ -84,6 +84,31 @@ SoilQueueWorkspaceTest >> tearDown [
 ]
 
 { #category : #tests }
+SoilQueueWorkspaceTest >> testAClaimedEntryIsPassedByWhenWorkIsSelected [
+	"a claimed entry belongs to a worker, or to the recovery pass when nobody holds it, and it
+	keeps its key -- a claim does not change one. Selection steps over it to the next pending
+	entry; handing it out again would give a work unit that throws straight back to the next
+	worker"
+
+	| txn claimed next |
+	self addQueueNamed: #work.
+	claimed := self put: (self entryDueIn: 1 seconds).
+	next := self put: (self entryDueIn: 10 seconds).
+	txn := soil newTransaction.
+	[ ((self workspaceIn: txn) entryAt: claimed) claimAt: DateAndTime now.
+	  txn commit ] ensure: [ txn isAborted ifFalse: [ txn abort ] ].
+
+	txn := soil newTransaction.
+	self
+		assert: ((self workspaceIn: txn)
+			nextDueAt: DateAndTime now + 1 minute
+			skipping: #(  )
+			ifNone: [ nil ])
+		equals: next.
+	txn abort
+]
+
+{ #category : #tests }
 SoilQueueWorkspaceTest >> testAKeyCarriesTheDueTimeInFrontOfTheId [
 	"the ordering rests on this: due time first, so the oldest due entry is the first key
 	of the section and finding work is a lookup rather than a search"
@@ -91,7 +116,7 @@ SoilQueueWorkspaceTest >> testAKeyCarriesTheDueTimeInFrontOfTheId [
 	| description entry key |
 	description := self addQueueNamed: #work.
 	entry := self entryDueIn: 0 seconds.
-	key := description workspace defaultLane keyFor: entry.
+	key := description workspace defaultLane keyFor: entry in: description workspace.
 	self assert: key size equals: 24.
 	self assert: (key copyFrom: 9 to: 16) equals: entry id.
 	self

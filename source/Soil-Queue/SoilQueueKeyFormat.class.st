@@ -10,6 +10,13 @@ domain matters only, and two entries of one queue could end up sorting different
 
 Everything I write is fixed length and big endian, so that byte order and numeric order
 agree -- an index compares keys as numbers.
+
+How a lane is read follows from how its keys are ordered, so that is mine too: which
+entry is due next, how many are, and which key an entry lies under once its due time has
+changed. What I answer is how a lane ordered by due time is read -- the first pending
+key is the oldest, and the first one that is not due says that none behind it is. A
+format that orders otherwise answers the three for itself; the workspace never asks
+which kind of format a lane has.
 "
 Class {
 	#name : #SoilQueueKeyFormat,
@@ -25,27 +32,69 @@ SoilQueueKeyFormat class >> isAbstract [
 
 { #category : #converting }
 SoilQueueKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of: aQueueWorkspace on: aWriteStream [
-	"add my part of the key for an entry that comes into a lane. Most formats need nothing
-	but the entry; one that numbers its entries has to look at what the lane holds already,
-	and the workspace is where that is read"
+	"add my part of the key for an entry that comes into a lane, and nothing else. Most
+	formats need nothing but the entry; one that numbers its entries has to look at what
+	the lane holds already, and the workspace is where that is read"
 
-	^ self appendKeyPartsFor: anEntry on: aWriteStream
+	^ self subclassResponsibility
+]
+
+{ #category : #reading }
+SoilQueueKeyFormat >> dueCountIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime upTo: aLimit [
+	"how many entries of a lane are due, counted no further than aLimit. The walk stops at
+	the first entry that is not due, because nothing behind it in my order can be.
+
+	Only pending entries count. One that says claimed is with a worker already, or waiting
+	for the recovery pass, and in neither case does it call for another worker"
+
+	| count |
+	count := 0.
+	aQueueWorkspace keysAndEntriesIn: aLaneDescription do: [ :key :entry |
+		entry readyAt > aDateAndTime ifTrue: [ ^ count ].
+		entry isPending ifTrue: [
+			count := count + 1.
+			count >= aLimit ifTrue: [ ^ count ] ] ].
+	^ count
 ]
 
 { #category : #converting }
-SoilQueueKeyFormat >> appendKeyPartsFor: anEntry on: aWriteStream [
-	"add my part of the key for anEntry, and nothing else"
+SoilQueueKeyFormat >> keyFor: anEntry movedFrom: anIndexKey in: aLaneDescription of: aQueueWorkspace [
+	"the key an entry lies under once its due time may have changed -- a follow-up later, a
+	backoff. The due time is in my keys, so that is a key built anew, and the same one when
+	the due time did not change"
 
-	^ self subclassResponsibility
+	^ (aLaneDescription keyFor: anEntry in: aQueueWorkspace)
+		asIndexKeyOfSize: aQueueWorkspace keySize
 ]
 
-{ #category : #testing }
-SoilQueueKeyFormat >> ordersByDueTime [
-	"whether the due time is in my keys. If it is, an entry whose due time changes has to
-	move to a new key, and the first entry of a lane that is not due says that none behind
-	it is. If not, the key stays where it is and the due time is read from the entry"
+{ #category : #reading }
+SoilQueueKeyFormat >> nextDueIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime skipping: aCollection preferring: aPreferredKey after: aLastKey ifNone: aBlock [
+	"the key of the oldest entry of a lane that is due, skipping the keys that are already
+	out. The two keys are for a format that hands out by group; I ignore them. When nothing
+	is due, aBlock is evaluated with the time the next entry becomes due, or with nil when
+	there is nothing at all -- so a caller can sleep exactly as long as it has to rather
+	than come back and ask again.
 
-	^ self subclassResponsibility
+	Only pending entries are handed out. An entry that says claimed belongs to a worker, or
+	to the recovery pass if no worker holds it -- and it stays in the ordering either way,
+	because a claim does not change a key. Without this a work unit that throws would be
+	handed straight back to the next worker, for ever. A key that is out is passed without
+	its entry being read"
+
+	| range |
+	range := aLaneDescription range.
+	aQueueWorkspace
+		scanFrom: range firstIndexKey
+		to: range lastIndexKey
+		do: [ :key :entryBlock |
+			(aCollection includes: key) ifFalse: [
+				| entry |
+				entry := entryBlock value.
+				entry isPending ifTrue: [
+					entry readyAt <= aDateAndTime ifTrue: [ ^ key ].
+					^ aBlock cull: entry readyAt ] ].
+			key + 1 ].
+	^ aBlock cull: nil
 ]
 
 { #category : #accessing }
