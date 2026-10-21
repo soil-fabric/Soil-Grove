@@ -23,6 +23,10 @@ The due time is not in the key. It stays on the entry, so an entry that has to w
 up its group where it is instead of moving behind the others: of a chain, the next step
 must not run before the one ahead of it.
 
+So a lane of mine is read by its groups. Of each group only the first entry can go, and a
+first one that is not due says nothing about the next group; I answer which entry is due
+next and how many are from the group heads, one jump per group.
+
 The width of a group id is mine, eight bytes unless said otherwise. The sequence takes
 four, the id eight.
 "
@@ -60,12 +64,25 @@ SoilQueueGroupedKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of:
 		nextPutAll: anEntry id
 ]
 
-{ #category : #converting }
-SoilQueueGroupedKeyFormat >> appendKeyPartsFor: anEntry on: aWriteStream [
-	"my part of a key cannot be told from the entry alone: where it stands in its group
-	depends on what the group holds already"
+{ #category : #reading }
+SoilQueueGroupedKeyFormat >> dueCountIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime upTo: aLimit [
+	"only the first entry of each group can go, so only those are counted, and a first one
+	that is not due says nothing about the next group: all groups are looked at, one jump
+	each"
 
-	^ self error: 'a grouped key needs the lane and the workspace it goes into'
+	| count range |
+	count := 0.
+	range := aLaneDescription range.
+	self
+		groupHeadsIn: aLaneDescription
+		of: aQueueWorkspace
+		from: range firstIndexKey
+		to: range lastIndexKey
+		do: [ :key :entry |
+			(entry isPending and: [ entry readyAt <= aDateAndTime ]) ifTrue: [
+				count := count + 1.
+				count >= aLimit ifTrue: [ ^ count ] ] ].
+	^ count
 ]
 
 { #category : #accessing }
@@ -110,10 +127,42 @@ SoilQueueGroupedKeyFormat >> groupIn: aKey of: aRange [
 	^ aKey copyFrom: start to: start + groupIdSize - 1
 ]
 
+{ #category : #reading }
+SoilQueueGroupedKeyFormat >> groupHeadsIn: aLaneDescription of: aQueueWorkspace from: aFirstIndexKey to: aLastIndexKey do: aBlock [
+	"the first entry of every group that begins between two keys, with its key. One jump per
+	group rather than one step per entry: from the head of a group straight past its last
+	possible key. The first entry the transaction sees is the head -- one that is done and
+	gone is not in the way"
+
+	aQueueWorkspace
+		scanFrom: aFirstIndexKey
+		to: aLastIndexKey
+		do: [ :key :entryBlock |
+			aBlock value: key value: entryBlock value.
+			(self lastIndexKeyOfGroupOf: key in: aLaneDescription of: aQueueWorkspace) + 1 ]
+]
+
 { #category : #accessing }
 SoilQueueGroupedKeyFormat >> groupIdSize [
 
 	^ groupIdSize
+]
+
+{ #category : #reading }
+SoilQueueGroupedKeyFormat >> headOfGroupOf: anIndexKey in: aLaneDescription of: aQueueWorkspace [
+	"the first entry of the group a key belongs to, as key -> entry, or nil when the group
+	holds nothing any more"
+
+	| keySize first |
+	keySize := aQueueWorkspace keySize.
+	first := (self
+		firstKeyOfGroupOf: (anIndexKey asByteArrayOfSize: keySize)
+		in: aLaneDescription range) asIndexKeyOfSize: keySize.
+	aQueueWorkspace
+		scanFrom: first
+		to: (self lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescription of: aQueueWorkspace)
+		do: [ :key :entryBlock | ^ key -> entryBlock value ].
+	^ nil
 ]
 
 { #category : #initialization }
@@ -121,6 +170,25 @@ SoilQueueGroupedKeyFormat >> initialize [
 
 	super initialize.
 	groupIdSize := 8
+]
+
+{ #category : #converting }
+SoilQueueGroupedKeyFormat >> keyFor: anEntry movedFrom: anIndexKey in: aLaneDescription of: aQueueWorkspace [
+	"the key it has. The due time is not in my keys, so an entry that has to wait stays where
+	it is and holds up its group, and its due time is read from it"
+
+	^ anIndexKey
+]
+
+{ #category : #accessing }
+SoilQueueGroupedKeyFormat >> lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescription of: aQueueWorkspace [
+	"the highest key the group of anIndexKey can have, in the form the index compares in"
+
+	| keySize |
+	keySize := aQueueWorkspace keySize.
+	^ (self
+		lastKeyOfGroupOf: (anIndexKey asByteArrayOfSize: keySize)
+		in: aLaneDescription range) asIndexKeyOfSize: keySize
 ]
 
 { #category : #accessing }
@@ -136,10 +204,53 @@ SoilQueueGroupedKeyFormat >> lastKeyOfGroupOf: aKey in: aRange [
 	^ self lastKeyOfGroup: (self groupIn: aKey of: aRange) in: aRange
 ]
 
-{ #category : #testing }
-SoilQueueGroupedKeyFormat >> ordersByDueTime [
+{ #category : #reading }
+SoilQueueGroupedKeyFormat >> nextDueIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime skipping: aCollection preferring: aPreferredKey after: aLastKey ifNone: aBlock [
+	"the first entry of a group, and only of a group whose first entry is not out: the group
+	of aPreferredKey if it has one due -- a worker carrying on with its own chain --,
+	otherwise the next group behind that of aLastKey, round the end of the lane and back, so
+	that low group ids do not always win. Either key may be nil.
 
-	^ false
+	A group whose first entry is out, or claimed with nobody holding it, goes without: its
+	next entry must not overtake it. A first entry that is not due does not end the scan
+	the way it does on a lane ordered by due time -- a later group may have one that is --
+	it only offers its time"
+
+	| range earliest goes start |
+	range := aLaneDescription range.
+	earliest := nil.
+	goes := [ :key :entry |
+		((aCollection includes: key) or: [ entry isPending not ])
+			ifTrue: [ false ]
+			ifFalse: [
+				entry readyAt <= aDateAndTime
+					ifTrue: [ true ]
+					ifFalse: [
+						earliest := earliest
+							ifNil: [ entry readyAt ]
+							ifNotNil: [ :time | time min: entry readyAt ].
+						false ] ] ].
+	(aPreferredKey notNil and: [ range includesKey: aPreferredKey ]) ifTrue: [
+		(self headOfGroupOf: aPreferredKey in: aLaneDescription of: aQueueWorkspace)
+			ifNotNil: [ :head |
+				(goes value: head key value: head value) ifTrue: [ ^ head key ] ] ].
+	start := (aLastKey notNil and: [ range includesKey: aLastKey ])
+		ifTrue: [
+			(self lastIndexKeyOfGroupOf: aLastKey in: aLaneDescription of: aQueueWorkspace) + 1 ]
+		ifFalse: [ range firstIndexKey ].
+	self
+		groupHeadsIn: aLaneDescription
+		of: aQueueWorkspace
+		from: start
+		to: range lastIndexKey
+		do: [ :key :entry | (goes value: key value: entry) ifTrue: [ ^ key ] ].
+	self
+		groupHeadsIn: aLaneDescription
+		of: aQueueWorkspace
+		from: range firstIndexKey
+		to: start - 1
+		do: [ :key :entry | (goes value: key value: entry) ifTrue: [ ^ key ] ].
+	^ aBlock cull: earliest
 ]
 
 { #category : #accessing }

@@ -15,6 +15,11 @@ every key, and a format that orders its keys; both are stored here, as
 SoilQueueLaneDescriptions, because they shape every key -- whoever opens me without a
 description still has to find the entries. How fast a lane runs is not mine.
 
+How a lane is read -- which entry is due next, how many are, where an entry goes when its
+due time changes -- is the lane's format's. I walk the index for it, in one scan that
+goes where the format says (#scanFrom:to:do:), and never ask which kind of format a lane
+has.
+
 How wide the marker is, is decided when I am created, and with it how many lanes I can
 hold: none wide means one lane over the whole index, one byte means up to 256. A lane
 comes in by #addLaneNamed:format:, and I hand out its marker -- the lowest free one.
@@ -91,8 +96,8 @@ SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 	SoilQueue>>#add:in:, so this is only for whoever writes to me directly.
 
 	Answers the key in the form the index compares in, which is the form everything else
-	hands around too. #keyFor: of the lane answers the other form, the bytes it is composed
-	of."
+	hands around too. #keyFor:in: of the lane answers the other form, the bytes it is
+	composed of."
 
 	| key |
 	anEntry readyAt ifNil: [ anEntry readyAt: DateAndTime now ].
@@ -174,31 +179,14 @@ SoilQueueWorkspace >> dueCountAt: aDateAndTime in: aLaneDescription upTo: aLimit
 	"how many entries of a lane are due, counted no further than aLimit.
 
 	The number is only ever used to decide how many workers to have, so counting past the
-	limit would buy nothing. The walk stops at the first entry that is not due either,
-	because a lane is ordered by due time and nothing behind it can be due.
+	limit would buy nothing. How the lane is walked for it is its format's to say"
 
-	Only pending entries count. One that says claimed is with a worker already, or waiting
-	for the recovery pass, and in neither case does it call for another worker.
-
-	On a grouped lane only the first entry of each group can go, so only those are counted,
-	and a first one that is not due says nothing about the next group: all groups are
-	looked at, one jump each."
-
-	| count |
-	count := 0.
-	aLimit < 1 ifTrue: [ ^ count ].
-	aLaneDescription format ordersByDueTime ifFalse: [
-		self groupHeadsIn: aLaneDescription do: [ :key :entry |
-			(entry isPending and: [ entry readyAt <= aDateAndTime ]) ifTrue: [
-				count := count + 1.
-				count >= aLimit ifTrue: [ ^ count ] ] ].
-		^ count ].
-	self keysAndEntriesIn: aLaneDescription do: [ :key :entry |
-		entry readyAt > aDateAndTime ifTrue: [ ^ count ].
-		entry isPending ifTrue: [
-			count := count + 1.
-			count >= aLimit ifTrue: [ ^ count ] ] ].
-	^ count
+	aLimit < 1 ifTrue: [ ^ 0 ].
+	^ aLaneDescription format
+		dueCountIn: aLaneDescription
+		of: self
+		at: aDateAndTime
+		upTo: aLimit
 ]
 
 { #category : #accessing }
@@ -211,50 +199,6 @@ SoilQueueWorkspace >> entryAt: aKey [
 SoilQueueWorkspace >> entryAt: aKey ifAbsent: aBlock [
 
 	^ index at: aKey ifAbsent: aBlock
-]
-
-{ #category : #enumerating }
-SoilQueueWorkspace >> groupHeadsIn: aLaneDescription do: aBlock [
-	"the first entry of every group of a grouped lane with its key, in key order"
-
-	self
-		groupHeadsIn: aLaneDescription
-		from: aLaneDescription range firstIndexKey
-		to: aLaneDescription range lastIndexKey
-		do: aBlock
-]
-
-{ #category : #enumerating }
-SoilQueueWorkspace >> groupHeadsIn: aLaneDescription from: aFirstIndexKey to: aLastIndexKey do: aBlock [
-	"the first entry of every group that begins between two keys, with its key. One jump per
-	group rather than one step per entry: from the head of a group straight past its last
-	possible key. The first entry this transaction sees is the head -- one that is done and
-	gone is not in the way"
-
-	| iterator scanKey found |
-	iterator := index newIterator.
-	scanKey := aFirstIndexKey.
-	[ scanKey <= aLastIndexKey
-		and: [ (found := iterator nextKeyCloseTo: scanKey) notNil
-		and: [ found <= aLastIndexKey ] ] ] whileTrue: [
-			aBlock value: found value: (iterator at: found).
-			scanKey := (self lastIndexKeyOfGroupOf: found in: aLaneDescription) + 1 ]
-]
-
-{ #category : #accessing }
-SoilQueueWorkspace >> headOfGroupOf: anIndexKey in: aLaneDescription [
-	"the first entry of the group a key belongs to, as key -> entry, or nil when the group
-	holds nothing any more"
-
-	| format keyBytes first last iterator found |
-	format := aLaneDescription format.
-	keyBytes := anIndexKey asByteArrayOfSize: keySize.
-	first := (format firstKeyOfGroupOf: keyBytes in: aLaneDescription range) asIndexKeyOfSize: keySize.
-	last := self lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescription.
-	iterator := index newIterator.
-	found := iterator nextKeyCloseTo: first.
-	(found notNil and: [ found <= last ]) ifFalse: [ ^ nil ].
-	^ found -> (iterator at: found)
 ]
 
 { #category : #accessing }
@@ -302,29 +246,20 @@ SoilQueueWorkspace >> keysAndEntriesIn: aLaneDescription do: aBlock [
 	"every entry of one lane with its key, in key order -- jumping to the start of the lane's
 	section and stopping where it ends"
 
-	| iterator range scanKey found |
+	| range |
 	range := aLaneDescription range.
-	iterator := index newIterator.
-	scanKey := range firstIndexKey.
-	[ found := iterator nextKeyCloseTo: scanKey.
-	  found notNil and: [ range includesKey: found ] ] whileTrue: [
-		aBlock value: found value: (iterator at: found).
-		scanKey := found + 1 ]
+	self
+		scanFrom: range firstIndexKey
+		to: range lastIndexKey
+		do: [ :key :entryBlock |
+			aBlock value: key value: entryBlock value.
+			key + 1 ]
 ]
 
 { #category : #accessing }
 SoilQueueWorkspace >> keySize [
 
 	^ keySize
-]
-
-{ #category : #accessing }
-SoilQueueWorkspace >> lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescription [
-	"the highest key the group of anIndexKey can have, in the form the index compares in"
-
-	^ (aLaneDescription format
-		lastKeyOfGroupOf: (anIndexKey asByteArrayOfSize: keySize)
-		in: aLaneDescription range) asIndexKeyOfSize: keySize
 ]
 
 { #category : #accessing }
@@ -389,13 +324,12 @@ SoilQueueWorkspace >> moveKey: aKey for: anEntry [
 	only to change the number it is filed under. Asked of the index and not of an iterator
 	on it -- the index is the one that writes the journal and marks itself for the commit.
 
-	A lane whose keys carry no due time keeps the key: the entry waits where it is, and its
-	due time is read from it."
+	Which key that is, is the lane's format's to say. One whose keys carry no due time
+	answers the key the entry has: it waits where it is, and its due time is read from it."
 
 	| lane newKey |
 	lane := self laneFor: aKey.
-	lane format ordersByDueTime ifFalse: [ ^ aKey ].
-	newKey := (lane keyFor: anEntry in: self) asIndexKeyOfSize: keySize.
+	newKey := lane format keyFor: anEntry movedFrom: aKey in: lane of: self.
 	newKey = aKey ifTrue: [ ^ aKey ].
 	index moveKey: aKey to: newKey.
 	^ newKey
@@ -421,106 +355,19 @@ SoilQueueWorkspace >> nextDueAt: aDateAndTime in: aLaneDescription skipping: aCo
 	out. When nothing is due, aBlock is evaluated with the time the next entry becomes due,
 	or with nil when there is nothing at all.
 
-	A lane ordered by due time answers its oldest due entry and ignores the two keys. A
-	grouped lane answers the first entry of a group, and only of a group whose first entry
-	is not out: the group of aPreferredKey if it has one due -- a worker carrying on with its
-	own chain --, otherwise the next group behind that of aLastKey, round the end of the
-	lane and back, so that low group ids do not always win. Either key may be nil."
+	Which entry that is, is the lane's format's to say: the oldest due one on a lane ordered
+	by due time, the first of a group on a grouped lane -- preferring the group of
+	aPreferredKey, a worker carrying on with its own chain, and otherwise taking the groups
+	in turn from behind that of aLastKey. Either key may be nil."
 
-	^ aLaneDescription format ordersByDueTime
-		ifTrue: [
-			self
-				nextOldestDueAt: aDateAndTime
-				in: aLaneDescription
-				skipping: aCollection
-				ifNone: aBlock ]
-		ifFalse: [
-			self
-				nextGroupHeadDueAt: aDateAndTime
-				in: aLaneDescription
-				skipping: aCollection
-				preferring: aPreferredKey
-				after: aLastKey
-				ifNone: aBlock ]
-]
-
-{ #category : #accessing }
-SoilQueueWorkspace >> nextGroupHeadDueAt: aDateAndTime in: aLaneDescription skipping: aCollection preferring: aPreferredKey after: aLastKey ifNone: aBlock [
-	"see #nextDueAt:in:skipping:preferring:after:ifNone:. A group whose first entry is out,
-	or claimed with nobody holding it, goes without: its next entry must not overtake it.
-	A first entry that is not due does not end the scan the way it does on a lane ordered by
-	due time -- a later group may have one that is -- it only offers its time"
-
-	| range earliest goes start |
-	range := aLaneDescription range.
-	earliest := nil.
-	goes := [ :key :entry |
-		((aCollection includes: key) or: [ entry isPending not ])
-			ifTrue: [ false ]
-			ifFalse: [
-				entry readyAt <= aDateAndTime
-					ifTrue: [ true ]
-					ifFalse: [
-						earliest := earliest
-							ifNil: [ entry readyAt ]
-							ifNotNil: [ :time | time min: entry readyAt ].
-						false ] ] ].
-	(aPreferredKey notNil and: [ range includesKey: aPreferredKey ]) ifTrue: [
-		(self headOfGroupOf: aPreferredKey in: aLaneDescription) ifNotNil: [ :head |
-			(goes value: head key value: head value) ifTrue: [ ^ head key ] ] ].
-	start := (aLastKey notNil and: [ range includesKey: aLastKey ])
-		ifTrue: [ (self lastIndexKeyOfGroupOf: aLastKey in: aLaneDescription) + 1 ]
-		ifFalse: [ range firstIndexKey ].
-	self
-		groupHeadsIn: aLaneDescription
-		from: start
-		to: range lastIndexKey
-		do: [ :key :entry | (goes value: key value: entry) ifTrue: [ ^ key ] ].
-	self
-		groupHeadsIn: aLaneDescription
-		from: range firstIndexKey
-		to: start - 1
-		do: [ :key :entry | (goes value: key value: entry) ifTrue: [ ^ key ] ].
-	^ aBlock cull: earliest
-]
-
-{ #category : #accessing }
-SoilQueueWorkspace >> nextOldestDueAt: aDateAndTime in: aLaneDescription skipping: aCollection ifNone: aBlock [
-	"the key of the oldest entry of a lane ordered by due time that is due, skipping the keys
-	that are already out.
-
-	When nothing is due, aBlock is evaluated with the time the next entry becomes due, or
-	with nil when there is nothing at all -- so a caller can sleep exactly as long as it
-	has to rather than come back and ask again.
-
-	The scan jumps rather than steps: to the start of the lane's section, then past each key
-	it looked at. What ends it is the range, which says where the section stops. Past the
-	last key of the index the positioning call answers nil, so that end takes care of
-	itself.
-
-	Only pending entries are handed out. An entry that says claimed belongs to a worker, or
-	to the recovery pass if no worker holds it -- and it stays in the ordering either way,
-	because a claim does not change a key. Without this a work unit that throws would be
-	handed straight back to the next worker, for ever."
-
-	| iterator range scanKey found |
-	range := aLaneDescription range.
-	iterator := index newIterator.
-	scanKey := range firstIndexKey.
-	[ found := iterator nextKeyCloseTo: scanKey.
-	  found notNil and: [ range includesKey: found ] ]
-		whileTrue: [
-			(aCollection includes: found)
-				ifTrue: [ scanKey := found + 1 ]
-				ifFalse: [
-					| entry |
-					entry := iterator at: found.
-					entry isPending
-						ifFalse: [ scanKey := found + 1 ]
-						ifTrue: [
-							entry readyAt <= aDateAndTime ifTrue: [ ^ found ].
-							^ aBlock cull: entry readyAt ] ] ].
-	^ aBlock cull: nil
+	^ aLaneDescription format
+		nextDueIn: aLaneDescription
+		of: self
+		at: aDateAndTime
+		skipping: aCollection
+		preferring: aPreferredKey
+		after: aLastKey
+		ifNone: aBlock
 ]
 
 { #category : #accessing }
@@ -601,6 +448,28 @@ SoilQueueWorkspace >> removeLaneNamed: aSymbol discardingEntries: aBoolean [
 	keys do: [ :each | index removeKey: each ].
 	parked do: [ :each | deadLetters removeKey: each ].
 	lanes remove: lane
+]
+
+{ #category : #enumerating }
+SoilQueueWorkspace >> scanFrom: aFirstIndexKey to: aLastIndexKey do: aBlock [
+	"walk the keys between two keys, both included, in key order -- the one walk that reads
+	a lane forward; #lastKeyFrom:to: is the one that steps back, from the end of a run.
+	aBlock gets a key and a block that reads its entry, and answers the key to go on from:
+	the key plus one to step, a key further on to jump past what lies between, nil to stop.
+
+	The entry is read only where it is asked for. Reading it looks the key up a second time,
+	and a key that is passed by -- one that is out, say -- should not cost that. The walk
+	ends where the keys do: past aLastIndexKey, or past the last key of the index, where the
+	positioning call answers nil"
+
+	| iterator scanKey found |
+	iterator := index newIterator.
+	scanKey := aFirstIndexKey.
+	[ scanKey notNil
+		and: [ scanKey <= aLastIndexKey
+		and: [ (found := iterator nextKeyCloseTo: scanKey) notNil
+		and: [ found <= aLastIndexKey ] ] ] ]
+		whileTrue: [ scanKey := aBlock value: found value: [ iterator at: found ] ]
 ]
 
 { #category : #initialization }
