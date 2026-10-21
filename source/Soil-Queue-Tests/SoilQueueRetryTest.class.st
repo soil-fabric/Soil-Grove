@@ -182,6 +182,7 @@ SoilQueueRetryTest >> testARetriableFailureIsTriedAgainAfterABackoff [
 	self put: [ :target | SoilQueueTestFlakyEntry on: target failing: 1 ].
 	queue := self queue.
 	(SoilQueueWorker on: queue) run.
+	queue runStep.
 
 	self assert: self onlyEntry equals: { #pending. clock now + 1 second. 1. 0 }.
 	self assert: queue wakeAt equals: clock now + 1 second.

@@ -317,7 +317,7 @@ SoilQueueCrashTest >> testAnEntryHeldByALiveWorkerIsNotTakenAway [
 	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
 	queue := self queue.
 	txn := soil newTransaction.
-	queue assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
+	queue assignNextDueAt: DateAndTime now in: txn.
 	txn abort.
 	queue claim: key.
 
@@ -350,7 +350,7 @@ SoilQueueCrashTest >> testAnEntryHeldByAWorkerOfTheRunBeforeIsNotTakenAwayAtASta
 	queue := self queue.
 	queue recoverOrphanedClaims.
 	txn := soil newTransaction.
-	queue assignNextDueAt: DateAndTime now in: txn ifNone: [ nil ].
+	queue assignNextDueAt: DateAndTime now in: txn.
 	txn abort.
 	queue claim: key.
 	txn := soil newTransaction.

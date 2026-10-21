@@ -65,12 +65,14 @@ SoilQueueGroupedKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of:
 ]
 
 { #category : #reading }
-SoilQueueGroupedKeyFormat >> dueCountIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime upTo: aLimit [
-	"only the first entry of each group can go, so only those are counted, and a first one
-	that is not due says nothing about the next group: all groups are looked at, one jump
-	each"
+SoilQueueGroupedKeyFormat >> dueIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime skipping: aCollection upTo: aLimit do: aBlock [
+	"only the first entry of each group can go, so only those count -- and only of a group
+	whose first entry is neither out nor claimed: that group goes without, its next entry
+	must not overtake it. A first one that is not due says nothing about the next group, so
+	all groups are looked at, one jump each, and the earliest of the first ones that are not
+	due is the time"
 
-	| count range |
+	| count earliest range |
 	count := 0.
 	range := aLaneDescription range.
 	self
@@ -79,10 +81,16 @@ SoilQueueGroupedKeyFormat >> dueCountIn: aLaneDescription of: aQueueWorkspace at
 		from: range firstIndexKey
 		to: range lastIndexKey
 		do: [ :key :entry |
-			(entry isPending and: [ entry readyAt <= aDateAndTime ]) ifTrue: [
-				count := count + 1.
-				count >= aLimit ifTrue: [ ^ count ] ] ].
-	^ count
+			((aCollection includes: key) or: [ entry isPending not ]) ifFalse: [
+				entry readyAt <= aDateAndTime
+					ifTrue: [
+						count := count + 1.
+						count >= aLimit ifTrue: [ ^ aBlock value: count value: nil ] ]
+					ifFalse: [
+						earliest := earliest
+							ifNil: [ entry readyAt ]
+							ifNotNil: [ :time | time min: entry readyAt ] ] ] ].
+	^ aBlock value: count value: earliest
 ]
 
 { #category : #accessing }

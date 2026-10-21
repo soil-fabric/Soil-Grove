@@ -40,21 +40,35 @@ SoilQueueKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of: aQueue
 ]
 
 { #category : #reading }
-SoilQueueKeyFormat >> dueCountIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime upTo: aLimit [
-	"how many entries of a lane are due, counted no further than aLimit. The walk stops at
-	the first entry that is not due, because nothing behind it in my order can be.
+SoilQueueKeyFormat >> dueIn: aLaneDescription of: aQueueWorkspace at: aDateAndTime skipping: aCollection upTo: aLimit do: aBlock [
+	"what the dispatcher reads of a lane, in one walk: how many of its entries are due,
+	leaving out the keys in aCollection and counting no further than aLimit, and when the
+	next one after aDateAndTime falls due. aBlock gets the two. The time is nil when the
+	count reached aLimit -- the workers it asks for are all the lane can have, and they come
+	back for more -- and when nothing comes after.
 
-	Only pending entries count. One that says claimed is with a worker already, or waiting
-	for the recovery pass, and in neither case does it call for another worker"
+	In my order both lie on one walk: the due entries come first, and the first one that is
+	not due is the time. Only pending entries count. One that says claimed is with a worker,
+	or waiting for the recovery pass, and neither asks for another worker; a key that is out
+	is passed without its entry being read"
 
-	| count |
+	| count range |
 	count := 0.
-	aQueueWorkspace keysAndEntriesIn: aLaneDescription do: [ :key :entry |
-		entry readyAt > aDateAndTime ifTrue: [ ^ count ].
-		entry isPending ifTrue: [
-			count := count + 1.
-			count >= aLimit ifTrue: [ ^ count ] ] ].
-	^ count
+	range := aLaneDescription range.
+	aQueueWorkspace
+		scanFrom: range firstIndexKey
+		to: range lastIndexKey
+		do: [ :key :entryBlock |
+			(aCollection includes: key) ifFalse: [
+				| entry |
+				entry := entryBlock value.
+				entry isPending ifTrue: [
+					entry readyAt > aDateAndTime ifTrue: [
+						^ aBlock value: count value: entry readyAt ].
+					count := count + 1.
+					count >= aLimit ifTrue: [ ^ aBlock value: count value: nil ] ] ].
+			key + 1 ].
+	^ aBlock value: count value: nil
 ]
 
 { #category : #converting }

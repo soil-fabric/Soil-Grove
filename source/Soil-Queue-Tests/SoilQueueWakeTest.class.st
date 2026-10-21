@@ -1,11 +1,11 @@
 "
 The wake time: an entry that is due later has to wake somebody when its time comes.
 
-Two places learn when that is, and neither opens a transaction for it. A dispatcher step
-reads it off the ordering it scans anyway; a worker that runs dry hears it from the queue
-when nothing is handed out -- the scan that found nothing due found the next due time on
-the way. The dispatcher then sleeps until then, or until something happens first: new
-work, a stop, a worker reporting an earlier time.
+One place learns when that is: the dispatcher step, in the one read it makes of each
+lane, which counts the due entries and finds the next time on the same walk. A worker that
+runs dry hands nothing on -- it ends, and its end is a signal that brings the next step.
+The dispatcher then sleeps until then, or until something happens first: new work, a
+stop, a worker that ended.
 
 Time is the queue's clock here, not the wall clock, so 'an hour later' costs nothing and
 says exactly what it says. Everything is driven straight through except the two tests
@@ -228,6 +228,24 @@ SoilQueueWakeTest >> testAStepForgetsAWakeTimeThatHasPassed [
 ]
 
 { #category : #tests }
+SoilQueueWakeTest >> testAStepThatDoesNotGetToReadLeavesNoTimeThatHasPassed [
+	"the read is what sets the wake time. A step that stops before it -- the queue is
+	stopping, the read throws -- still drops the old one, or a time in the past would have
+	the dispatcher step, and step, and step"
+
+	| queue |
+	self put: (self entryDueIn: 1 hour).
+	queue := self queue.
+	queue runStep.
+	self assert: queue wakeAt equals: clock now + 1 hour.
+
+	clock advanceBy: 2 hours.
+	queue requestStop.
+	queue runStep.
+	self assert: queue wakeAt isNil
+]
+
+{ #category : #tests }
 SoilQueueWakeTest >> testATickWakesTheDispatcherWhenItsTimeHasCome [
 	"the wait is measured in the time that was left when it began. A clock that moves
 	faster than that -- here the test's, in production a wall clock set forward -- is
@@ -245,17 +263,19 @@ SoilQueueWakeTest >> testATickWakesTheDispatcherWhenItsTimeHasCome [
 ]
 
 { #category : #tests }
-SoilQueueWakeTest >> testAWorkerThatRunsDryHandsTheWakeTimeOn [
-	"the dispatcher never took a step here. The worker's empty scan found the next due time
-	on its way, and that is where the dispatcher hears it"
+SoilQueueWakeTest >> testAWorkerThatEndsHasTheDispatcherLookAgain [
+	"a worker that runs dry hands no time on. It says that it ended, and the step that brings
+	reads when the next entry falls due"
 
 	| queue |
 	self put: (self entryDueIn: 0 seconds).
 	self put: (self entryDueIn: 1 hour).
 	queue := self queue.
-	self assert: queue wakeAt isNil.
 
 	(SoilQueueWorker on: queue) run.
+	self assert: queue wakeAt isNil.
+	self assert: queue runStrategy isDue.
+	queue runStep.
 	self assert: queue wakeAt equals: clock now + 1 hour
 ]
 
@@ -293,6 +313,8 @@ SoilQueueWakeTest >> testAnEntryThatGoesOnLaterMovesItsKey [
 	self assert: queue wakeAt isNil.
 
 	self assert: (SoilQueueWorker on: queue) runOnce isNil.
+	self assert: queue wakeAt isNil.
+	queue runStep.
 	self assert: queue wakeAt equals: clock now + 1 hour
 ]
 
