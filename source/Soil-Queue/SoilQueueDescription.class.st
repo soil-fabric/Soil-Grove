@@ -10,10 +10,10 @@ entries. I am read to configure the queue at every start, and only then: my valu
 its lanes, which hold them until the next start. The queue reaches its
 workspace by id.
 
-Every value is set for all lanes, and may be set for one lane in particular, by the
-same selector with forLane:. A lane takes what is set for it and the rest from what is set
-for all -- the worker limit as much as the retry budgets and the backoff. Kept by lane
-name, since the lanes themselves are the workspace's.
+Every value is set for all lanes, and may be set for one lane in particular, by the same
+selector with forLane:. A lane takes what is set for it and the rest from what is set
+for all -- the worker limit as much as the limit for entries given back and the backoff.
+Kept by lane name, since the lanes themselves are the workspace's.
 
 The workspace is a cluster root of its own. I make it one in #initializeFrom:, which is
 where a description creates the objects its resident works on, and it makes the index

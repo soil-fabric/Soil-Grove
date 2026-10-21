@@ -181,21 +181,23 @@ SoilQueueRetryTest >> testAFailureAtTheWorkGivesUpAtOnce [
 
 { #category : #tests }
 SoilQueueRetryTest >> testAnErrorOfSoilsFromTheWorkGivesTheEntryBack [
-	"a record of the target that cannot be read is no statement about the work, and a
-	segment that is not there yet is often there a moment later. So the entry is not given
-	up on: it goes back the way an orphan goes back, counted, after a wait, and the failed
-	step is counted as one"
+	"a segment that is not there yet, an index that points nowhere: no statement about the
+	work, and often gone a moment later. So the entry is not given up on: it goes back the
+	way an orphan goes back, counted, after a wait, and the failed step is counted as one.
+	It is not run again at once either -- only a write conflict is"
 
 	| queue |
 	self put: [ :target | SoilQueueTestUnreachableEntry on: target ].
 	queue := self queue.
+	SoilQueueTestUnreachableEntry resetAttempts.
 	(SoilQueueWorker on: queue) runOnce.
 
 	self
 		assert: self onlyEntry
 		equals: { #pending. clock now + 1 second. 1 }.
 	self assert: queue stepErrorCount equals: 1.
-	self assert: self targetEffects isEmpty
+	self assert: self targetEffects isEmpty.
+	self assert: SoilQueueTestUnreachableEntry attempts equals: 1
 ]
 
 { #category : #tests }
@@ -235,11 +237,12 @@ SoilQueueRetryTest >> testAnEntryThatKeepsFailingOutsideItsWorkUnitIsParkedAtThe
 
 { #category : #tests }
 SoilQueueRetryTest >> testAnEntryWhoseStepFailsOutsideItsWorkUnitIsGivenBackAndWaits [
-	"a work unit that throws is booked. An error around it is not: the commit threw, a
-	conflict did not resolve. The entry still says claimed and no worker holds it, which is
-	what a lost worker leaves behind, so it goes back the way an orphan goes back --
-	counted as one, and after a wait, so that a commit that is not going through right now
-	does not use up the budget in milliseconds"
+	"a work unit that fails at its work is booked. An error of Soil's is not, and an error
+	around the work unit is not either: the commit threw, a conflict did not resolve. The
+	entry still says claimed and no worker holds it, which is what a lost worker leaves
+	behind, so it goes back the way an orphan goes back -- counted as one, and after a
+	wait, so that a commit that is not going through right now does not use up the budget
+	in milliseconds"
 
 	| queue |
 	SoilQueueTestConflictingEntry conflictsToRaise: 99.

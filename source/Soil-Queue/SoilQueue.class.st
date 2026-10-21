@@ -246,8 +246,7 @@ SoilQueue >> book: anError for: aKey [
 
 	A failure at the work is a result. It is not tried again and not parked: a retry a far
 	side would want is the entry's own business, a due time it sets itself, and a dead
-	letter is kept for an entry that keeps coming back because nobody gets as far as its
-	work -- see #recover:.
+	letter is kept for an entry that keeps coming back -- see #recover:.
 
 	The error is kept for diagnosis. It is not counted as a step error: that count is what
 	shows a crash loop, and a failure that was handled is none"
@@ -736,8 +735,9 @@ SoilQueue >> work: aKey [
 	snapshot. A fresh transaction is what makes the re-read happen, and it is the whole
 	point of starting over rather than committing again.
 
-	A work unit that throws is booked afterwards, outside the loop: a conflict in the
-	bookkeeping must not run the work again."
+	A work unit that fails at its work is booked afterwards, outside the loop: a conflict in
+	the bookkeeping must not run the work again at once. It gets out of the step, and the
+	entry goes back the way an orphan goes back."
 
 	| attempts failure |
 	attempts := 0.
@@ -793,15 +793,16 @@ SoilQueue >> workOnce: aKey [
 	the target: only the reference travels. An entry that did not move its due time keeps
 	its key and is due again immediately.
 
-	Two ways to fail, told apart by where the error comes from. One that is not Soil's is a
-	statement about the work: the whole transaction is discarded, and I answer the error,
-	so that it is booked in a transaction of its own (#book:for:) -- the entry gives up.
-	One that is Soil's is no statement about the work, wherever it comes from -- a write
-	conflict, a record of the target that cannot be read, a segment that is not there yet
-	-- and it passes. #work: runs the unit again for a conflict; anything else gets out of
-	the step, and the entry, still claimed, goes back the way an orphan goes back, after a
-	wait, and is parked when its lane allows no more (#stepFailed:on:). Otherwise I answer
-	nil."
+	Two ways for the work unit to fail, told apart by the class of the error. One that is
+	not a SoilError is taken as a statement about the work: the whole transaction is
+	discarded, and I answer the error, so that it is booked in a transaction of its own
+	(#book:for:) -- the entry gives up. A SoilError is not -- a write conflict, a segment
+	that is not there yet, an index that points nowhere -- and it passes. #work: runs the
+	unit again for a conflict; anything else gets out of the step, and the entry, still
+	claimed, goes back the way an orphan goes back, after a wait, and is parked when its
+	lane allows no more (#stepFailed:on:). Only the work unit is watched like this: an
+	error from the bookkeeping around it or from the commit passes too, whatever its class.
+	Otherwise I answer nil."
 
 	self withTransactionDo: [ :txn |
 		| workspace entry outcome |
