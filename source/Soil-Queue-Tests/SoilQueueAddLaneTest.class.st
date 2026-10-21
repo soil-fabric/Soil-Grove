@@ -163,13 +163,10 @@ SoilQueueAddLaneTest >> testAnAddedLaneRunsLikeTheDefaultLane [
 	| queue lane |
 	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
 	queue := self queue.
-	queue defaultLane rateLimit: 1 per: 1 minute.
+	queue defaultLane backoffBase: 1 minute.
 	lane := queue addLane: #b format: self format.
 	self assert: lane pool identicalTo: queue defaultLane pool.
-
-	self put: 3 into: #b.
-	(SoilQueueWorker on: queue lane: lane) run.
-	self assert: self left equals: 2
+	self assert: lane backoffBase equals: 1 minute
 ]
 
 { #category : #tests }

@@ -34,7 +34,7 @@ SoilQueueCleanCodeTest >> soilTransientDeclarationPackages [
 	"the two transient-declaration checks look here rather than at #packageToCheck. Soil
 	checks its own packages itself; what is unchecked until this says so is ours -- and a
 	queue is exactly the kind of persisted object that needs the declaration, because its
-	mutex, its in-flight set and its rate counter must not be written."
+	mutex, its in-flight set and its live lanes must not be written."
 
 	^ { SoilQueueEntry package }
 ]
