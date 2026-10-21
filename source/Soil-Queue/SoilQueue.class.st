@@ -524,9 +524,10 @@ SoilQueue >> recover: aKey [
 	dead-lettering of its own.
 
 	This is the one moment the queue learns that a worker went away, so it is where that is
-	counted. An entry that has lost its worker as often as its lane allows is not given back
-	but parked: whatever took the worker with it would take the next one too. Compensated
-	first all the same, so that what it left behind is not left lying under a dead letter.
+	counted. An entry that has lost its worker as often in a row as its lane allows is not
+	given back but parked: whatever took the worker with it would take the next one too.
+	Compensated first all the same, so that what it left behind is not left lying under a
+	dead letter.
 
 	An entry that is given back waits first, by the same curve a failed work unit waits by:
 	what took its worker away -- a commit that does not go through, a segment that is not

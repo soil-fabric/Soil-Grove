@@ -64,7 +64,7 @@ SoilQueueDescription class >> named: aSymbol workspace: aQueueWorkspace [
 
 { #category : #retrying }
 SoilQueueDescription >> backoffBase [
-	"the pause before the first retry. Every further failure doubles it, up to
+	"the pause before the first retry. Every further failure in a row doubles it, up to
 	#backoffCap. One second by default, so that a short disturbance -- a dropped
 	connection -- is over quickly"
 
@@ -120,10 +120,10 @@ SoilQueueDescription >> configureLane: aLane [
 
 { #category : #retrying }
 SoilQueueDescription >> failureRetryLimit [
-	"how often a work unit that failed retriably is tried again before the entry gives up.
-	Three by default. A retry is only ever asked for by an entry that calls an error
-	retriable, and what it costs -- a far side hit again, a quota used up -- is why the
-	budget is narrow"
+	"how often in a row a work unit that failed retriably is tried again before the entry
+	gives up. Three by default. A retry is only ever asked for by an entry that calls an
+	error retriable, and what it costs -- a far side hit again, a quota used up -- is why
+	the budget is narrow"
 
 	^ failureRetryLimit ifNil: [ 3 ]
 ]
@@ -180,11 +180,12 @@ SoilQueueDescription >> newInstanceIn: aTransaction [
 
 { #category : #accessing }
 SoilQueueDescription >> orphanedRetryLimit [
-	"how often an entry may lose its worker and be given back before it is parked as a dead
-	letter. nil means no limit, and nil is the default: an entry that takes its worker
-	with it every time -- the poison entry -- is the case the limit is for, and how many
-	lost workers are too many depends on what the work does and how often the embedder
-	deploys. That is the embedder's knowledge; a number here would be a guess"
+	"how often in a row an entry may lose its worker and be given back before it is parked
+	as a dead letter -- a step of it that goes through ends the row. nil means no limit,
+	and nil is the default: an entry that takes its worker with it every time -- the poison
+	entry -- is the case the limit is for, and how many lost workers in a row are too many
+	depends on what the work does and how often the embedder deploys. That is the
+	embedder's knowledge; a number here would be a guess"
 
 	^ orphanedRetryLimit
 ]

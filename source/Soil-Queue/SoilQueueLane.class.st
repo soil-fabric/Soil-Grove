@@ -55,16 +55,18 @@ SoilQueueLane class >> named: aSymbol configuredFrom: aDescription [
 { #category : #retrying }
 SoilQueueLane >> allowsFailureRetryOf: anEntry [
 	"whether an entry whose work unit failed retriably may be tried once more. With a limit
-	of three, three retries happen and the fourth failure is the one that gives up"
+	of three, three retries in a row happen and the fourth failure is the one that gives up"
 
 	^ anEntry failureRetries < failureRetryLimit
 ]
 
 { #category : #retrying }
 SoilQueueLane >> allowsOrphanedRetryOf: anEntry [
-	"whether an entry that lost its worker may be given back once more. Counted like the
-	restarts of a resident: with a limit of two, two orphaned entries come back and the
-	third orphaning is the one that parks it"
+	"whether an entry that lost its worker may be given back once more. The limit reads
+	like the restart limit of a resident: with a limit of two, an entry orphaned twice in a
+	row comes back both times and the third orphaning is the one that parks it. Unlike a
+	resident's restarts the count is of times in a row: a step of the entry that goes
+	through in between ends the row"
 
 	^ orphanedRetryLimit isNil or: [ anEntry orphanedRetries < orphanedRetryLimit ]
 ]

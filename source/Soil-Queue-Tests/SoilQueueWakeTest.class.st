@@ -132,8 +132,8 @@ SoilQueueWakeTest >> stateAndDueTimeAt: aKey [
 
 { #category : #helpers }
 SoilQueueWakeTest >> statesAndOrphanedRetries [
-	"each entry as its state and how often it lost its worker, read inside the transaction
-	for the reason #stateAndDueTimeAt: gives"
+	"each entry as its state and how often in a row it was given back, read inside the
+	transaction for the reason #stateAndDueTimeAt: gives"
 
 	| txn found |
 	txn := soil newTransaction.

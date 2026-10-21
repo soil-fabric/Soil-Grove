@@ -51,6 +51,17 @@ SoilQueueRetryTest >> inTransaction: aBlock [
 ]
 
 { #category : #helpers }
+SoilQueueRetryTest >> loseTheWorkerOn: aQueue [
+	"what a commit that did not go through leaves behind, handed to the queue the way a
+	worker hands it: the one entry claimed, and the step failed around its work unit"
+
+	| key |
+	key := self onlyKey.
+	aQueue claim: key.
+	aQueue stepFailed: (Error new messageText: 'the commit failed'; yourself) on: key
+]
+
+{ #category : #helpers }
 SoilQueueRetryTest >> onlyEntry [
 	"state, due time and the two counters of the one entry in the ordering, or nil when it
 	has left it. Read inside the transaction, because an entry comes back as a proxy"
@@ -60,6 +71,18 @@ SoilQueueRetryTest >> onlyEntry [
 	^ [ | found |
 	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
 		found := { entry state. entry readyAt. entry failureRetries. entry orphanedRetries } ].
+	  found ]
+		ensure: [ txn abort ]
+]
+
+{ #category : #helpers }
+SoilQueueRetryTest >> onlyKey [
+	"the key of the one entry in the ordering. It moves each time the entry is put off"
+
+	| txn |
+	txn := soil newTransaction.
+	^ [ | found |
+	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry | found := key ].
 	  found ]
 		ensure: [ txn abort ]
 ]
@@ -252,6 +275,45 @@ SoilQueueRetryTest >> testAnEntryWhoseStepFailsOutsideItsWorkUnitIsGivenBackAndW
 		assert: self onlyEntry
 		equals: { #pending. clock now + 1 second. 0. 1 }.
 	self assert: queue stepErrorCount equals: 1
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAStepThatGoesThroughStartsTheWaitOverAgain [
+	"the wait doubles with each time in a row an entry is given back. Counted over its life
+	instead, a flow instance would wait the full hour after every deploy from the thirteenth
+	on, even when the step before had just gone through"
+
+	| queue |
+	self put: [ :target | SoilQueueTestContinuingEntry on: target steps: 3 ].
+	queue := self queue.
+	self loseTheWorkerOn: queue.
+	clock advanceBy: 1 second.
+	self loseTheWorkerOn: queue.
+	clock advanceBy: 2 seconds.
+	(SoilQueueWorker on: queue) runOnce.
+
+	self loseTheWorkerOn: queue.
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 0. 1 }
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testTheQueueSetsNoCountBackOnItsOwn [
+	"#more is the answer of a unit that only put itself off as well -- a throttle that asked
+	to wait. Only the entry knows which it was, so a count goes back to nothing when the
+	entry says so, and this one never does"
+
+	| queue |
+	self put: [ :target | SoilQueueTestPostponingEntry on: target postponedBy: 1 hour ].
+	queue := self queue.
+	self loseTheWorkerOn: queue.
+	clock advanceBy: 1 second.
+	(SoilQueueWorker on: queue) runOnce.
+
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 hour. 0. 1 }
 ]
 
 { #category : #tests }
