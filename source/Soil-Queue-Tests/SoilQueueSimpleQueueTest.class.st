@@ -139,18 +139,20 @@ SoilQueueSimpleQueueTest >> testEntriesComeOutInTheOrderTheyWerePutIn [
 
 { #category : #tests }
 SoilQueueSimpleQueueTest >> testAnEntryThatIsTriedAgainTakesItsPlaceAtTheBack [
-	"with no delay to wait out: the entry that failed goes to the back of the queue and the
-	ones that were waiting come first, so a retry waits as long as the queue is long. The
-	first one put in is the one that fails once"
+	"with no delay to wait out: the entry that is given back goes to the back of the queue
+	and the ones that were waiting come first, so a retry waits as long as the queue is
+	long. The first one put in is the one whose step fails once: its commit runs into a
+	conflict as often as a step allows, and the second time it goes through"
 
 	| queue worker |
 	self inTransaction: [ :txn |
 		(self descriptionIn: txn) backoffBase: 0 seconds ].
 	queue := self queue.
-	self put: [ :target | SoilQueueTestFlakyEntry on: target failing: 1 ] using: queue.
+	SoilQueueTestConflictingEntry conflictsToRaise: queue conflictLimit.
+	self put: [ :target | SoilQueueTestConflictingEntry on: target ] using: queue.
 	self put: [ :target | SoilQueueTestNumberedEntry on: target number: 2 ] using: queue.
 	self put: [ :target | SoilQueueTestNumberedEntry on: target number: 3 ] using: queue.
 	worker := SoilQueueWorker on: queue.
 	4 timesRepeat: [ worker runOnce ].
-	self assert: self targetEffects equals: #( 2 3 #ran )
+	self assert: self targetEffects equals: #( 2 3 #attempt )
 ]

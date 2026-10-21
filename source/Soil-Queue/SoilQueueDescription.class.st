@@ -3,17 +3,17 @@ What makes a queue a resident: I create it when the database opens and let the r
 machinery start it, and the start configures it. The queue itself works on its workspace, a
 SoilQueueWorkspace, and runs the same with or without me around it.
 
-I hold that workspace and the configuration -- how many workers, the retry budgets and
-the backoff. None of that shapes a key; what does, the index and the format,
+I hold that workspace and the configuration -- how many workers, how often an entry may
+come back, and the backoff. None of that shapes a key; what does, the index and the format,
 belongs to the workspace, because whoever opens it without me still has to find the
 entries. I am read to configure the queue at every start, and only then: my values go to
 its lanes, which hold them until the next start. The queue reaches its
 workspace by id.
 
-Every value is set for all lanes, and may be set for one lane in particular, by the
-same selector with forLane:. A lane takes what is set for it and the rest from what is set
-for all -- the worker limit as much as the retry budgets and the backoff. Kept by lane
-name, since the lanes themselves are the workspace's.
+Every value is set for all lanes, and may be set for one lane in particular, by the same
+selector with forLane:. A lane takes what is set for it and the rest from what is set
+for all -- the worker limit as much as the limit for entries given back and the backoff.
+Kept by lane name, since the lanes themselves are the workspace's.
 
 The workspace is a cluster root of its own. I make it one in #initializeFrom:, which is
 where a description creates the objects its resident works on, and it makes the index
@@ -33,7 +33,6 @@ Class {
 		'name',
 		'workerLimit',
 		'orphanedRetryLimit',
-		'failureRetryLimit',
 		'backoffBase',
 		'backoffCap',
 		'laneValues'
@@ -107,37 +106,10 @@ SoilQueueDescription >> configureLane: aLane [
 	| values |
 	values := laneValues ifNil: [ ^ self ].
 	values := values at: aLane name ifAbsent: [ ^ self ].
-	values at: #failureRetryLimit ifPresent: [ :limit | aLane failureRetryLimit: limit ].
 	values at: #orphanedRetryLimit ifPresent: [ :limit | aLane orphanedRetryLimit: limit ].
 	values at: #backoffBase ifPresent: [ :duration | aLane backoffBase: duration ].
 	values at: #backoffCap ifPresent: [ :duration | aLane backoffCap: duration ].
 	values at: #workerLimit ifPresent: [ :limit | aLane workerLimit: limit ]
-]
-
-{ #category : #retrying }
-SoilQueueDescription >> failureRetryLimit [
-	"how often in a row a work unit that failed retriably is tried again before the entry
-	gives up. Three by default. A retry is only ever asked for by an entry that calls an
-	error retriable, and what it costs -- a far side hit again, a quota used up -- is why
-	the budget is narrow"
-
-	^ failureRetryLimit ifNil: [ 3 ]
-]
-
-{ #category : #retrying }
-SoilQueueDescription >> failureRetryLimit: anInteger [
-
-	anInteger < 0 ifTrue: [
-		^ self error: 'a negative number of retries cannot be used up' ].
-	failureRetryLimit := anInteger
-]
-
-{ #category : #lanes }
-SoilQueueDescription >> failureRetryLimit: anInteger forLane: aSymbol [
-
-	anInteger < 0 ifTrue: [
-		^ self error: 'a negative number of retries cannot be used up' ].
-	(self valuesForLane: aSymbol) at: #failureRetryLimit put: anInteger
 ]
 
 { #category : #initialization }

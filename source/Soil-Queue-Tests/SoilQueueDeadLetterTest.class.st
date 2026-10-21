@@ -1,10 +1,15 @@
 "
 What happens to an entry the queue cannot work on at all.
 
-Dead lettering is reserved for that and kept apart from failing *at* the work, which is a
-result and ends the entry the ordinary way. The two look alike from the outside -- both
-leave the ordering -- and what separates them is where the entry ends up: a dead letter
-is parked and can still be looked at, a finished entry is done with.
+Such an entry keeps coming back: its step fails around its work -- a target that cannot
+be read -- so it is given back with a wait, the way an orphan is, and parked when its lane
+allows no more. Dead lettering is reserved for that and kept apart from failing *at* the
+work, which is a result and ends the entry the ordinary way. The two look alike from the
+outside -- both leave the ordering -- and what separates them is where the entry ends up:
+a dead letter is parked and can still be looked at, a finished entry is done with.
+
+On a lane that lets an entry come back once, and without a wait, so that a test can drive
+an entry to its dead letter straight through.
 
 Parked means out of the working ordering and into a store of its own. Out, so that it is
 not stepped over on every scan for work; into, so that work does not disappear without a
@@ -20,14 +25,16 @@ Class {
 }
 
 { #category : #helpers }
-SoilQueueDeadLetterTest >> deadLetteredKeys [
+SoilQueueDeadLetterTest >> deadLetters [
+	"each parked entry as its id and its state. By id, not by key: an entry that is given
+	back first waits, and its key moves with the time it waits for"
 
-	| txn keys |
+	| txn letters |
 	txn := soil newTransaction.
-	keys := OrderedCollection new.
+	letters := OrderedCollection new.
 	^ [ (self workspaceIn: txn)
-		deadLettersDo: [ :key :entry | keys add: key -> entry state ].
-	  keys asArray ]
+		deadLettersDo: [ :key :entry | letters add: entry id -> entry state ].
+	  letters asArray ]
 		ensure: [ txn abort ]
 ]
 
@@ -35,6 +42,14 @@ SoilQueueDeadLetterTest >> deadLetteredKeys [
 SoilQueueDeadLetterTest >> descriptionIn: aTransaction [
 
 	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
+]
+
+{ #category : #helpers }
+SoilQueueDeadLetterTest >> idOf: aKey [
+	"the eight bytes that tell an entry apart, in the key it was put in under: the due time
+	comes first, then the id"
+
+	^ (aKey asByteArrayOfSize: 24) copyFrom: 9 to: 16
 ]
 
 { #category : #accessing }
@@ -76,19 +91,27 @@ SoilQueueDeadLetterTest >> setUp [
 		destroy;
 		initializeFilesystem;
 		initializeRoot.
-	soil addResidentDescription: (SoilQueueDescription
+	soil addResidentDescription: ((SoilQueueDescription
 		named: #work
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24)
+		orphanedRetryLimit: 1;
+		backoffBase: 0 seconds;
+		yourself)
 ]
 
 { #category : #helpers }
 SoilQueueDeadLetterTest >> stateOf: aKey [
+	"nil when the entry put in under aKey has left the ordering. Found by its id, since its
+	key moves when it is given back"
 
-	| txn |
+	| id txn |
+	id := self idOf: aKey.
 	txn := soil newTransaction.
-	^ [ ((self workspaceIn: txn) entryAt: aKey ifAbsent: [ nil ])
-		ifNotNil: [ :entry | entry state ] ]
+	^ [ | found |
+	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
+		entry id = id ifTrue: [ found := entry state ] ].
+	  found ]
 		ensure: [ txn abort ]
 ]
 
@@ -121,16 +144,23 @@ SoilQueueDeadLetterTest >> testADeadLetterIsParkedWhereItCanBeFound [
 	self workOffEverything.
 
 	self assert: (self stateOf: key) equals: nil.
-	self assert: self deadLetteredKeys equals: { key -> #deadLetter }
+	self assert: self deadLetters equals: { (self idOf: key) -> #deadLetter }
 ]
 
 { #category : #tests }
-SoilQueueDeadLetterTest >> testATargetThatWasNeverSetIsNotGone [
-	"never had one is not the same as lost one, and only the second is a dead letter"
+SoilQueueDeadLetterTest >> testAnEntryThatCannotBeWorkedOnComesBackBeforeItIsParked [
+	"what keeps it from its work may be gone a moment later, so it is given back first, as
+	often as its lane allows -- here once"
 
-	| entry |
-	entry := SoilQueueTestRepeatingEntry new.
-	self assert: (entry isReadyToRunIn: nil)
+	| key |
+	key := self put: (SoilQueueTestUnreachableEntry on: 'gone').
+	self workOneUnit.
+	self assert: (self stateOf: key) equals: #pending.
+	self assert: self deadLetters isEmpty.
+
+	self workOneUnit.
+	self assert: (self stateOf: key) equals: nil.
+	self assert: self deadLetters equals: { (self idOf: key) -> #deadLetter }
 ]
 
 { #category : #tests }
@@ -144,7 +174,7 @@ SoilQueueDeadLetterTest >> testAnEntryBehindADeadLetterStillGetsItsTurn [
 
 	self assert: (self stateOf: gone) equals: nil.
 	self assert: (self stateOf: good) equals: nil.
-	self assert: self deadLetteredKeys equals: { gone -> #deadLetter }
+	self assert: self deadLetters equals: { (self idOf: gone) -> #deadLetter }
 ]
 
 { #category : #tests }
@@ -153,11 +183,11 @@ SoilQueueDeadLetterTest >> testAnEntryThatOnlyFailsAtItsWorkIsNotADeadLetter [
 	the same fact would be one too many"
 
 	| key |
-	key := self put: (SoilQueueTestRepeatingEntry on: SoilQueueTestTarget new).
+	key := self put: (SoilQueueTestBrokenEntry on: SoilQueueTestTarget new).
 	self workOffEverything.
 
 	self assert: (self stateOf: key) equals: nil.
-	self assert: self deadLetteredKeys equals: #(  )
+	self assert: self deadLetters isEmpty
 ]
 
 { #category : #helpers }

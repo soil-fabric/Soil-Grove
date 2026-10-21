@@ -91,17 +91,17 @@ SoilQueueEntryTest >> testAPlainTargetIsMaterializedWithMe [
 ]
 
 { #category : #tests }
-SoilQueueEntryTest >> testAStepThatGoesThroughSetsBothCountsBack [
-	"they count repetitions in a row, and a step that went through ends the row"
+SoilQueueEntryTest >> testAStepThatGoesThroughSetsTheCountBack [
+	"it counts the times in a row I was given back, and a step that went through ends the
+	row"
 
 	| entry |
 	entry := SoilQueueTestEntry on: 'work'.
 	entry
 		noteOrphaned;
-		noteFailure;
+		noteOrphaned;
 		noteStepDone.
-	self assert: entry orphanedRetries equals: 0.
-	self assert: entry failureRetries equals: 0
+	self assert: entry orphanedRetries equals: 0
 ]
 
 { #category : #tests }
@@ -171,19 +171,6 @@ SoilQueueEntryTest >> testDeadLetteringDropsTheClaim [
 	entry markDeadLetter.
 	self assert: entry isDeadLetter.
 	self assert: entry claimedAt isNil
-]
-
-{ #category : #tests }
-SoilQueueEntryTest >> testErrorsAreNotRetriableUnlessTheSubclassSaysSo [
-	"the default has to be the cautious one: the other way round, every new kind of work
-	would silently get retries nobody thought through"
-
-	self
-		assert: ((SoilQueueTestEntry on: 'work') classifyError: Error new)
-		equals: #permanent.
-	self
-		assert: ((SoilQueueTestRetriableEntry on: 'work') classifyError: Error new)
-		equals: #retriable
 ]
 
 { #category : #tests }

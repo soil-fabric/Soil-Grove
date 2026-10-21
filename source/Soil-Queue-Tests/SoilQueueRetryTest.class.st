@@ -1,14 +1,16 @@
 "
-What happens to an entry whose work unit throws.
+What happens to an entry whose step fails. Two ways, told apart by where the error comes
+from.
 
-The throwing transaction is gone, so everything here is the queue's bookkeeping in a
-transaction of its own: ask the entry what the error means, and then either put it off
-until later and count it, or give up on it. Giving up is a result and not a dead letter
--- the target learns of it through #giveUp:in:, and the entry is done.
+An error out of the work unit that is not Soil's is a statement about the work. The
+throwing transaction is gone, the queue books it in a transaction of its own, and the
+entry gives up: a result, not a dead letter -- the target learns of it through
+#giveUp:in:, and the entry is done. Nothing is tried again.
 
-The acceptance criterion of the block is #testAnEntryThatKeepsFailingGivesUpAfterItsBudget:
-an entry with transient failures goes through the backoff, gives up correctly, and never
-touches the counter for lost workers.
+Anything else -- an error of Soil's out of the work unit, a commit that does not go
+through, a conflict that does not resolve -- leaves the entry claimed with no worker
+holding it, and it goes back the way an orphan goes back: counted, after a wait by the
+curve of its lane, parked at the lane's limit.
 
 Driven on a clock that stands still until it is moved, so that a backoff is a statement
 about time rather than a wait.
@@ -63,14 +65,15 @@ SoilQueueRetryTest >> loseTheWorkerOn: aQueue [
 
 { #category : #helpers }
 SoilQueueRetryTest >> onlyEntry [
-	"state, due time and the two counters of the one entry in the ordering, or nil when it
-	has left it. Read inside the transaction, because an entry comes back as a proxy"
+	"state, due time and how often in a row it was given back, of the one entry in the
+	ordering, or nil when it has left it. Read inside the transaction, because an entry
+	comes back as a proxy"
 
 	| txn |
 	txn := soil newTransaction.
 	^ [ | found |
 	  (self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
-		found := { entry state. entry readyAt. entry failureRetries. entry orphanedRetries } ].
+		found := { entry state. entry readyAt. entry orphanedRetries } ].
 	  found ]
 		ensure: [ txn abort ]
 ]
@@ -154,17 +157,18 @@ SoilQueueRetryTest >> testAFailureIsRememberedButCountsAsNoStepError [
 	error itself stays readable for diagnosis"
 
 	| queue |
-	self put: [ :target | SoilQueueTestFlakyEntry on: target failing: 1 ].
+	self put: [ :target | SoilQueueTestBrokenEntry on: target ].
 	queue := self queue.
 	(SoilQueueWorker on: queue) runOnce.
 
-	self assert: queue lastStepError messageText equals: 'the far side answered 503'.
+	self assert: queue lastStepError messageText equals: 'the far side refused the request'.
 	self assert: queue stepErrorCount equals: 0
 ]
 
 { #category : #tests }
-SoilQueueRetryTest >> testAPermanentFailureGivesUpAtOnce [
-	"the base says #permanent, so nothing is retried that nobody thought through"
+SoilQueueRetryTest >> testAFailureAtTheWorkGivesUpAtOnce [
+	"nothing is retried that nobody thought through. A retry a far side would want is the
+	entry's own business, a due time it sets itself"
 
 	self put: [ :target | SoilQueueTestBrokenEntry on: target ].
 	(SoilQueueWorker on: self queue) runOnce.
@@ -172,56 +176,28 @@ SoilQueueRetryTest >> testAPermanentFailureGivesUpAtOnce [
 	self assert: self onlyEntry isNil.
 	self
 		assert: self targetEffects
-		equals: { { #gaveUp. 'the far side refused the request'. 0. 0 } }
+		equals: { { #gaveUp. 'the far side refused the request'. 0 } }
 ]
 
 { #category : #tests }
-SoilQueueRetryTest >> testARetriableFailureIsTriedAgainAfterABackoff [
+SoilQueueRetryTest >> testAnErrorOfSoilsFromTheWorkGivesTheEntryBack [
+	"a segment that is not there yet, an index that points nowhere: no statement about the
+	work, and often gone a moment later. So the entry is not given up on: it goes back the
+	way an orphan goes back, counted, after a wait, and the failed step is counted as one.
+	It is not run again at once either -- only a write conflict is"
 
 	| queue |
-	self put: [ :target | SoilQueueTestFlakyEntry on: target failing: 1 ].
+	self put: [ :target | SoilQueueTestUnreachableEntry on: target ].
 	queue := self queue.
-	(SoilQueueWorker on: queue) run.
-	queue runStep.
+	SoilQueueTestUnreachableEntry resetAttempts.
+	(SoilQueueWorker on: queue) runOnce.
 
-	self assert: self onlyEntry equals: { #pending. clock now + 1 second. 1. 0 }.
-	self assert: queue wakeAt equals: clock now + 1 second.
-	self assert: self targetEffects isEmpty.
-
-	clock advanceBy: 1 second.
-	(SoilQueueWorker on: queue) run.
-	self assert: self onlyEntry isNil.
-	self assert: self targetEffects equals: #( #ran )
-]
-
-{ #category : #tests }
-SoilQueueRetryTest >> testAnEntryMayChooseItsOwnDelay [
-
-	self put: [ :target | SoilQueueTestPatientEntry on: target failing: 5 ].
-	(SoilQueueWorker on: self queue) runOnce.
-	self assert: self onlyEntry second equals: clock now + 10 minutes
-]
-
-{ #category : #tests }
-SoilQueueRetryTest >> testAnEntryThatKeepsFailingGivesUpAfterItsBudget [
-	"the acceptance criterion: through the backoff, give up correctly, and the counter for
-	lost workers stays where it was -- nobody went away, the far side kept failing"
-
-	| queue |
-	self put: [ :target | SoilQueueTestFlakyEntry on: target failing: 100 ].
-	queue := self queue.
-	#( 1 2 4 ) doWithIndex: [ :seconds :retries |
-		(SoilQueueWorker on: queue) run.
-		self
-			assert: self onlyEntry
-			equals: { #pending. clock now + seconds seconds. retries. 0 }.
-		clock advanceBy: seconds seconds ].
-
-	(SoilQueueWorker on: queue) run.
-	self assert: self onlyEntry isNil.
 	self
-		assert: self targetEffects
-		equals: { { #gaveUp. 'the far side answered 503'. 3. 0 } }
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 1 }.
+	self assert: queue stepErrorCount equals: 1.
+	self assert: self targetEffects isEmpty.
+	self assert: SoilQueueTestUnreachableEntry attempts equals: 1
 ]
 
 { #category : #tests }
@@ -261,11 +237,12 @@ SoilQueueRetryTest >> testAnEntryThatKeepsFailingOutsideItsWorkUnitIsParkedAtThe
 
 { #category : #tests }
 SoilQueueRetryTest >> testAnEntryWhoseStepFailsOutsideItsWorkUnitIsGivenBackAndWaits [
-	"a work unit that throws is booked. An error around it is not: the commit threw, a
-	conflict did not resolve. The entry still says claimed and no worker holds it, which is
-	what a lost worker leaves behind, so it goes back the way an orphan goes back --
-	counted as one, and after a wait, so that a commit that is not going through right now
-	does not use up the budget in milliseconds"
+	"a work unit that fails at its work is booked. An error of Soil's is not, and an error
+	around the work unit is not either: the commit threw, a conflict did not resolve. The
+	entry still says claimed and no worker holds it, which is what a lost worker leaves
+	behind, so it goes back the way an orphan goes back -- counted as one, and after a
+	wait, so that a commit that is not going through right now does not use up the budget
+	in milliseconds"
 
 	| queue |
 	SoilQueueTestConflictingEntry conflictsToRaise: 99.
@@ -274,7 +251,7 @@ SoilQueueRetryTest >> testAnEntryWhoseStepFailsOutsideItsWorkUnitIsGivenBackAndW
 	(SoilQueueWorker on: queue) runOnce.
 	self
 		assert: self onlyEntry
-		equals: { #pending. clock now + 1 second. 0. 1 }.
+		equals: { #pending. clock now + 1 second. 1 }.
 	self assert: queue stepErrorCount equals: 1
 ]
 
@@ -296,7 +273,7 @@ SoilQueueRetryTest >> testAStepThatGoesThroughStartsTheWaitOverAgain [
 	self loseTheWorkerOn: queue.
 	self
 		assert: self onlyEntry
-		equals: { #pending. clock now + 1 second. 0. 1 }
+		equals: { #pending. clock now + 1 second. 1 }
 ]
 
 { #category : #tests }
@@ -314,7 +291,7 @@ SoilQueueRetryTest >> testTheQueueSetsNoCountBackOnItsOwn [
 
 	self
 		assert: self onlyEntry
-		equals: { #pending. clock now + 1 hour. 0. 1 }
+		equals: { #pending. clock now + 1 hour. 1 }
 ]
 
 { #category : #tests }
@@ -330,7 +307,7 @@ SoilQueueRetryTest >> testTheWaitOfAnEntryThatIsGivenBackDoublesWithEachTime [
 	worker runOnce.
 	self
 		assert: self onlyEntry
-		equals: { #pending. clock now + 2 seconds. 0. 2 }
+		equals: { #pending. clock now + 2 seconds. 2 }
 ]
 
 { #category : #tests }
@@ -347,11 +324,10 @@ SoilQueueRetryTest >> testTheBackoffDoublesUpToItsCap [
 ]
 
 { #category : #tests }
-SoilQueueRetryTest >> testTheDefaultsAreThreeRetriesFromOneSecondUpToAnHour [
+SoilQueueRetryTest >> testTheBackoffIsFromOneSecondUpToAnHourByDefault [
 
 	| description |
 	description := SoilQueueDescription new.
-	self assert: description failureRetryLimit equals: 3.
 	self assert: description backoffBase equals: 1 second.
 	self assert: description backoffCap equals: 1 hour
 ]
