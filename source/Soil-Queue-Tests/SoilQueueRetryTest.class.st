@@ -201,6 +201,23 @@ SoilQueueRetryTest >> testAnErrorOfSoilsFromTheWorkGivesTheEntryBack [
 ]
 
 { #category : #tests }
+SoilQueueRetryTest >> testAnErrorOfSoilsSerializerFromTheWorkGivesTheEntryBack [
+	"the serializer lies below Soil's core, so what it says is not a SoilError -- and it is
+	Soil's all the same: a layout that cannot be migrated is no statement about the work"
+
+	| queue |
+	self put: [ :target |
+		SoilQueueTestUnreachableEntry on: target raising: SoilLayoutMigrationError ].
+	queue := self queue.
+	(SoilQueueWorker on: queue) runOnce.
+
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 1 }.
+	self assert: self targetEffects isEmpty
+]
+
+{ #category : #tests }
 SoilQueueRetryTest >> testAnEntryThatCannotBeGivenBackStaysClaimed [
 	"giving it back is the queue's business, and when that fails too there is nobody left to
 	ask: it stays claimed, both failures are counted, and the next start finds it"
