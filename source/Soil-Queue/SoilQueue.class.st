@@ -178,11 +178,20 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction [
 SoilQueue >> assignNextIn: aLane preferring: aKey [
 	"what a worker of aLane asks for after it has worked on aKey, nil the first time. On a
 	grouped lane that says which chain it is on, so that it can carry on with it -- see
-	#assignNextIn:"
+	#assignNextIn:
+
+	The read that selects is opened under the mutex, not before it. Soil fixes what a
+	transaction sees when it opens, and a worker gives its entry back under the mutex after
+	its commit: opened before, the read could be older than the last give-back, still hold
+	an entry that is finished and gone, and find it no longer out -- it would be handed out
+	again, the claim would fail, and two step errors would be counted for nothing. Opening
+	a read costs no input or output, and no commit lies under the mutex; the mutex is
+	reentrant, so the selection takes it again inside"
 
 	self shouldStop ifTrue: [ ^ nil ].
-	^ self withTransactionDo: [ :txn |
-		self assignNextIn: aLane dueAt: self now preferring: aKey in: txn ]
+	^ mutex critical: [
+		self withTransactionDo: [ :txn |
+			self assignNextIn: aLane dueAt: self now preferring: aKey in: txn ] ]
 ]
 
 { #category : #working }

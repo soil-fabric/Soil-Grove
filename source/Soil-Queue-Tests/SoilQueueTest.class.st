@@ -170,6 +170,45 @@ SoilQueueTest >> testAnEmptyQueueHasNothingDue [
 ]
 
 { #category : #tests }
+SoilQueueTest >> testAnEntryGivenBackMeanwhileIsNotHandedOutFromAnOlderRead [
+	"another worker is on the first entry. It finishes and gives it back just as this one
+	asks: the entry leaves the ordering in its commit and stops being out at its give-back.
+	A read opened before both still has the entry, finds it no longer out, and hands it out
+	again. Opened under the mutex, the read is either newer than the give-back or the entry
+	is still out when it scans.
+
+	The other worker is a process of its own, as it is in a running queue, and it acts in
+	the gap between the opening of the read and what comes after it. While this worker
+	holds the mutex, the other cannot give the entry back; it waits a moment for that, and
+	the entry stays out"
+
+	| txn queue held next finished |
+	held := self put: (self entryDueIn: -1 seconds).
+	next := self put: (self entryDueIn: 0 seconds).
+	txn := soil newTransaction.
+	[ queue := SoilQueueTestInterleavingQueue onWorkspace: (self workspaceIn: txn) in: txn ]
+		ensure: [ txn abort ].
+	self assert: (queue assignNextIn: queue defaultLane) equals: held.
+
+	finished := Semaphore new.
+	queue interleave: [
+		| givenBack |
+		givenBack := Semaphore new.
+		[ | other |
+		  other := soil newTransaction.
+		  (self workspaceIn: other) removeKey: held.
+		  other commit.
+		  queue release: held.
+		  givenBack signal.
+		  finished signal ] fork.
+		givenBack waitTimeoutMilliseconds: 300 ].
+
+	self assert: (queue assignNextIn: queue defaultLane) equals: next.
+	finished waitTimeoutSeconds: 5.
+	self deny: (queue isHolding: held)
+]
+
+{ #category : #tests }
 SoilQueueTest >> testAnEntryIsHandedOutOnlyOnce [
 	"the whole reason the coordinating half is one object in memory"
 
