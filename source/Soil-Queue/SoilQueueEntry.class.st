@@ -2,10 +2,10 @@
 I am the wrapper that lies on a queue. Not the domain object itself: that keeps the
 queue generic and keeps the domain object free of execution state.
 
-What is generic is mine -- #state, #target, #claimedAt and the resumption semantics.
-What the work *is* belongs to my subclasses, and that seam is deliberately narrow: a
-queue must not know what the work does, what it costs, or which quota it counts
-against.
+What is generic is mine -- #state, #target and #claimedAt. What the work *is* belongs to
+my subclasses, and so does what holds after it was cut off. That seam is deliberately
+narrow: a queue must not know what the work does, what it costs, or which quota it
+counts against.
 
 I stay small on purpose, so that selection and diagnosis can read me without pulling
 the target's object graph along. That only holds while the target is a cluster root of
@@ -25,14 +25,18 @@ On a grouped lane it is #groupId instead of #readyAt that ends up in the key: my
 group, then my place in it, then #id. #readyAt stays with me there and is read from
 me, so a backoff holds up my group rather than moving me to its end.
 
-My resumption semantics answer the one question an abort leaves open, and the queue
-cannot answer it for me: *what holds afterwards*. An image can crash at any moment and
-a rolling release interrupts work as a matter of routine, so every entry has to say
-which of the three it is --
+An abort leaves one question open, and the queue cannot answer it for me: *what holds
+afterwards*. An image can crash at any moment and a rolling release interrupts work as a
+matter of routine, so every subclass answers it, in #resumeAfterAbortIn:. The queue calls
+it each time it finds me claimed with no worker, before it gives me back or parks me.
+There are three answers, and a subclass gives one of them and says which --
 
-	#continuing    resume at the progress point; the progress has to be persisted
-	#repeating     run again from the start; idempotence is a promise, not an assumption
-	#compensating  clean up what the aborted attempt left behind, then start over
+	continuing    resume at the progress point; the progress has to be persisted, and
+	              the hook has nothing to do
+	repeating     run again from the start; idempotence is a promise, not an
+	              assumption, and the hook has nothing to do
+	compensating  clean up what the aborted attempt left behind, in the hook, then
+	              start over
 
 I count how often I was given back: #orphanedRetries, once for each time I was found
 claimed with no worker holding me -- my worker went away, a crash, a deploy, a rolling
@@ -56,9 +60,13 @@ Waiting is courtesy, not a guarantee. A maintenance run can let entries finish; 
 cannot. Waiting lowers the number of repetitions -- the correctness is in the three
 semantics above and nowhere else.
 
-There is no default. Each of the three demands something different of the subclass,
-and a default would hand out one of those demands silently. The compensating case is
-the one that gets forgotten, and it produces most of the bugs.
+There is no default, and an empty method is one too: it would make every subclass that
+never thought about it a repeating one, silently. Each of the three demands something
+different of the subclass, and the compensating case is the one that gets forgotten and
+produces most of the bugs. So the two answers that do nothing are written out all the
+same, each with the sentence that says which of the two it is. A subclass that forgets
+the hook would only find out at its first orphan; SoilQueueCleanCodeTest asks every
+subclass that can work instead.
 "
 Class {
 	#name : #SoilQueueEntry,
@@ -68,7 +76,6 @@ Class {
 		'target',
 		'readyAt',
 		'claimedAt',
-		'resumption',
 		'id',
 		'progress',
 		'orphanedRetries',
@@ -100,14 +107,6 @@ SoilQueueEntry class >> on: anObject [
 ]
 
 { #category : #accessing }
-SoilQueueEntry class >> resumption [
-	"which of the three resumption semantics my instances follow -- see my class comment
-	for why there is no default here"
-
-	^ self subclassResponsibility
-]
-
-{ #category : #accessing }
 SoilQueueEntry >> claimAt: aDateAndTime [
 	"step 2 of a worker's run: its own short transaction, committed before the work
 	starts. Its only purpose is the crash case -- an entry found as #claimed with no
@@ -126,16 +125,6 @@ SoilQueueEntry >> claimedAt [
 	claim from a running one, once the queue also knows which entries its workers hold"
 
 	^ claimedAt
-]
-
-{ #category : #working }
-SoilQueueEntry >> compensateIn: aTransaction [
-	"undo what an aborted attempt left behind, so a fresh attempt starts from a clean
-	state. Only ever called for an entry whose resumption is #compensating. The other two
-	have nothing to undo, which is why this is not an empty method they would inherit by
-	accident"
-
-	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
@@ -200,7 +189,6 @@ SoilQueueEntry >> initialize [
 
 	super initialize.
 	state := #pending.
-	resumption := self class resumption.
 	id := self class newId.
 	orphanedRetries := 0
 ]
@@ -329,21 +317,30 @@ SoilQueueEntry >> progress: anObject [
 { #category : #accessing }
 SoilQueueEntry >> releaseClaim [
 	"give me back to the queue after a claim turned out to be orphaned. What happens
-	before this is what my resumption semantics say: a compensating entry is cleaned up
-	first, a continuing one keeps its progress, a repeating one starts over as it is."
+	before this is #resumeAfterAbortIn: -- a compensating entry is cleaned up there, a
+	continuing one keeps its progress, a repeating one starts over as it is."
 
 	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self expecting: #claimed ].
 	state := #pending.
 	claimedAt := nil
 ]
 
-{ #category : #accessing }
-SoilQueueEntry >> resumption [
-	"#continuing, #repeating or #compensating. Kept as a field rather than asked of my
-	class each time, so that cleaning up orphaned claims can read it off a materialized
-	entry"
+{ #category : #working }
+SoilQueueEntry >> resumeAfterAbortIn: aTransaction [
+	"my worker went away while I was claimed, or something around my work unit failed, and
+	I am about to be given back or parked: make true what has to hold for the next attempt.
+	Called by the queue every time it finds me so, in the transaction that gives me back
+	or parks me and before it does either, so what I write here is committed with that.
 
-	^ resumption
+	Which of the three answers from my class comment a subclass gives is its own to say,
+	and it says it here: a continuing or a repeating entry has nothing to do and says
+	which of the two it is, a compensating one cleans up. An error here keeps me claimed
+	until the next start of the queue.
+
+	Asked of me and not of my class: what the queue holds may be a proxy that has not read
+	me yet, and the class of a proxy is not mine"
+
+	^ self subclassResponsibility
 ]
 
 { #category : #accessing }

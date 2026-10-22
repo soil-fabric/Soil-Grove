@@ -28,12 +28,6 @@ SoilQueueTestContinuingEntry class >> on: aTarget steps: anInteger [
 		yourself
 ]
 
-{ #category : #accessing }
-SoilQueueTestContinuingEntry class >> resumption [
-
-	^ #continuing
-]
-
 { #category : #initialization }
 SoilQueueTestContinuingEntry >> initialize [
 
@@ -53,6 +47,12 @@ SoilQueueTestContinuingEntry >> performIn: aTransaction [
 	^ step < stepsOwed
 		ifTrue: [ #more ]
 		ifFalse: [ #finished ]
+]
+
+{ #category : #working }
+SoilQueueTestContinuingEntry >> resumeAfterAbortIn: aTransaction [
+	"continuing: my progress was committed with each step, so I pick up where it says.
+	Nothing to put right"
 ]
 
 { #category : #accessing }

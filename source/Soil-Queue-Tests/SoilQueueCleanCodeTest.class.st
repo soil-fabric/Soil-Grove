@@ -38,3 +38,16 @@ SoilQueueCleanCodeTest >> soilTransientDeclarationPackages [
 
 	^ { SoilQueueEntry package }
 ]
+
+{ #category : #tests }
+SoilQueueCleanCodeTest >> testEveryEntryThatCanWorkSaysWhatHoldsAfterAnAbort [
+	"#resumeAfterAbortIn: has no default, and a subclass that forgets it would not find out
+	before its first orphan -- after a crash, where the queue can only report it and leave
+	the entry claimed. Asked here of every subclass that can be put to work, whatever its
+	package: one that cannot work yet is there to be subclassed, and says nothing about the
+	work either"
+
+	self assertEmpty: (SoilQueueEntry allSubclasses select: [ :each |
+		(each lookupSelector: #performIn:) isAbstract not and: [
+			(each lookupSelector: #resumeAfterAbortIn:) isAbstract ] ])
+]

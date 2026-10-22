@@ -11,21 +11,17 @@ Class {
 	#category : #'Soil-Queue-Tests'
 }
 
-{ #category : #accessing }
-SoilQueueTestCompensatingEntry class >> resumption [
-
-	^ #compensating
-]
-
-{ #category : #working }
-SoilQueueTestCompensatingEntry >> compensateIn: aTransaction [
-
-	self target undoLastEffect
-]
-
 { #category : #working }
 SoilQueueTestCompensatingEntry >> performIn: aTransaction [
 
 	self target addEffect: #ran.
 	^ #finished
+]
+
+{ #category : #working }
+SoilQueueTestCompensatingEntry >> resumeAfterAbortIn: aTransaction [
+	"compensating: the aborted attempt may have left its effect on my target, and that goes
+	before I run again"
+
+	self target undoLastEffect
 ]

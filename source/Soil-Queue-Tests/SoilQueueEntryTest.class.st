@@ -1,8 +1,8 @@
 "
 What the wrapper has to hold up before anything is built on it: the state machine
-refuses the transitions that would hide a crash, the resumption semantics come from the
-subclass and survive a write, and an entry read back from disk leaves a cluster-root
-target where it is instead of materializing it.
+refuses the transitions that would hide a crash, what holds after an abort is the
+subclass's to say, and an entry read back from disk leaves a cluster-root target where it
+is instead of materializing it.
 
 The last one is the reason the wrapper exists in this shape, and it is the one that
 cannot be seen in memory -- it needs a real database and a second transaction.
@@ -114,17 +114,6 @@ SoilQueueEntryTest >> testAnEntryStartsPendingAndUnclaimed [
 ]
 
 { #category : #tests }
-SoilQueueEntryTest >> testAnEntryThatIsNotCompensatingHasNoCompensation [
-	"the base leaves #compensateIn: unimplemented rather than inheriting an empty one to
-	the two semantics that have nothing to undo. An empty default would make a missing
-	cleanup look like a cleanup that had nothing to do"
-
-	self
-		should: [ (SoilQueueTestEntry on: 'work') compensateIn: nil ]
-		raise: SubclassResponsibility
-]
-
-{ #category : #tests }
 SoilQueueEntryTest >> testClaimingRecordsTheTime [
 
 	| entry now |
@@ -155,7 +144,7 @@ SoilQueueEntryTest >> testCompensationIsTheSubclassesToImplement [
 	target := SoilQueueTestTarget new.
 	target addEffect: #ran.
 	entry := SoilQueueTestCompensatingEntry on: target.
-	entry compensateIn: nil.
+	entry resumeAfterAbortIn: nil.
 	self assert: target effects equals: #(  ).
 	self assert: target compensations equals: #( 1 )
 ]
@@ -183,29 +172,12 @@ SoilQueueEntryTest >> testFinishingAnUnclaimedEntryIsRefused [
 ]
 
 { #category : #tests }
-SoilQueueEntryTest >> testResumptionComesFromTheClassAndSurvivesAWrite [
-	"the semantics have to be readable off an entry that was just materialized, because
-	that is the situation they exist for: cleaning up after a crash"
-
-	| txn readBack |
-	txn := soil newTransaction.
-	txn root: (SoilQueueTestCompensatingEntry on: 'work').
-	txn commit.
-
-	txn := soil newTransaction.
-	readBack := txn root.
-	self assert: readBack resumption equals: #compensating.
-	self assert: readBack isPending.
-	txn abort
-]
-
-{ #category : #tests }
-SoilQueueEntryTest >> testTheAbstractEntryHasNoResumptionOfItsOwn [
-	"no default: each of the three demands something different of the subclass, and a
-	default would hand out one of those demands silently"
+SoilQueueEntryTest >> testTheAbstractEntryHasNoAnswerAfterAnAbort [
+	"no default: each of the three answers demands something different of the subclass,
+	and a default -- an empty method above all -- would hand out one of them silently"
 
 	self
-		should: [ SoilQueueEntry resumption ]
+		should: [ SoilQueueEntry new resumeAfterAbortIn: nil ]
 		raise: SubclassResponsibility
 ]
 

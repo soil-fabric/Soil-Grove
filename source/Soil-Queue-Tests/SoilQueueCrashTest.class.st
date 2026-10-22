@@ -241,6 +241,22 @@ SoilQueueCrashTest >> testACompensatingEntryIsCleanedUpBeforeItRunsAgain [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testACompensatingEntryThatIsParkedIsCleanedUpFirst [
+	"parked rather than given back, it is asked all the same, and before: what the aborted
+	attempt left behind does not stay lying under a dead letter"
+
+	| key |
+	self orphanedRetryLimit: 0.
+	key := self put: [ :target | SoilQueueTestCompensatingEntry on: target ].
+	self crashAfterAnEffectOn: key.
+	self queue recoverOrphanedClaims.
+
+	self assert: self deadLetters equals: { { self idOf: key. #deadLetter. 0 } }.
+	self assert: self targetCompensations equals: #( 1 ).
+	self assert: self targetEffects equals: #(  )
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testAContinuingEntryPicksUpWhereItStopped [
 	"the steps already done are not done again, because the progress was committed after
 	each of them"
