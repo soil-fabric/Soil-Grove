@@ -66,7 +66,8 @@ different of the subclass, and the compensating case is the one that gets forgot
 produces most of the bugs. So the two answers that do nothing are written out all the
 same, each with the sentence that says which of the two it is. A subclass that forgets
 the hook would only find out at its first orphan; SoilQueueCleanCodeTest asks every
-subclass that can work instead.
+subclass that can work instead -- in an image that loads the tests of this package. A
+project that loads only the queue does not get the question from here.
 "
 Class {
 	#name : #SoilQueueEntry,
@@ -316,9 +317,10 @@ SoilQueueEntry >> progress: anObject [
 
 { #category : #accessing }
 SoilQueueEntry >> releaseClaim [
-	"give me back to the queue after a claim turned out to be orphaned. What happens
-	before this is #resumeAfterAbortIn: -- a compensating entry is cleaned up there, a
-	continuing one keeps its progress, a repeating one starts over as it is."
+	"give me back to the queue: my work unit answered #more, or my claim turned out to be
+	orphaned. Only in the second case is something cut off, and #resumeAfterAbortIn: comes
+	first -- a compensating entry is cleaned up there, a continuing one keeps its progress,
+	a repeating one starts over as it is."
 
 	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self expecting: #claimed ].
 	state := #pending.

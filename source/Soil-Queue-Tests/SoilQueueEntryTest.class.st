@@ -144,6 +144,7 @@ SoilQueueEntryTest >> testCompensationIsTheSubclassesToImplement [
 	target := SoilQueueTestTarget new.
 	target addEffect: #ran.
 	entry := SoilQueueTestCompensatingEntry on: target.
+	entry claimAt: DateAndTime now.
 	entry resumeAfterAbortIn: nil.
 	self assert: target effects equals: #(  ).
 	self assert: target compensations equals: #( 1 )

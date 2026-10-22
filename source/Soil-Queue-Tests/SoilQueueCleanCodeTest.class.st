@@ -45,7 +45,8 @@ SoilQueueCleanCodeTest >> testEveryEntryThatCanWorkSaysWhatHoldsAfterAnAbort [
 	before its first orphan -- after a crash, where the queue can only report it and leave
 	the entry claimed. Asked here of every subclass that can be put to work, whatever its
 	package: one that cannot work yet is there to be subclassed, and says nothing about the
-	work either"
+	work either. Only where this package is loaded, though -- a project that loads the
+	queue without its tests asks its own subclasses itself"
 
 	self assertEmpty: (SoilQueueEntry allSubclasses select: [ :each |
 		(each lookupSelector: #performIn:) isAbstract not and: [

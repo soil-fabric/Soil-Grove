@@ -227,7 +227,8 @@ SoilQueueCrashTest >> testACompensatingEntryIsCleanedUpBeforeItRunsAgain [
 	"the case that gets forgotten, and the one the other two cannot cover: the aborted
 	attempt left an effect standing, so the cleanup goes first and takes it away. What is
 	left afterwards is one effect, not two -- and the cleanup found exactly the one that
-	was there"
+	was there. First means before the claim is given back, too: the entry refuses to clean
+	up without it"
 
 	| key |
 	key := self put: [ :target | SoilQueueTestCompensatingEntry on: target ].
@@ -242,8 +243,9 @@ SoilQueueCrashTest >> testACompensatingEntryIsCleanedUpBeforeItRunsAgain [
 
 { #category : #tests }
 SoilQueueCrashTest >> testACompensatingEntryThatIsParkedIsCleanedUpFirst [
-	"parked rather than given back, it is asked all the same, and before: what the aborted
-	attempt left behind does not stay lying under a dead letter"
+	"parked rather than given back, it is asked all the same, and before it is parked --
+	the entry refuses to clean up once its claim is gone. What the aborted attempt left
+	behind does not stay lying under a dead letter"
 
 	| key |
 	self orphanedRetryLimit: 0.
