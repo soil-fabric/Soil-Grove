@@ -436,6 +436,30 @@ SoilQueueCrashTest >> testAnOrphanThatCannotBeGivenBackDoesNotKeepTheOthers [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testAParkThatDoesNotGoThroughIsNotSaid [
+	"the line comes once the commit has gone through. Here the cleanup writes the target,
+	and another transaction has written it in between: the commit fails, the entry stays
+	claimed for the next start, and a line would tell of a dead letter that is not there"
+
+	| key queue txn |
+	key := self put: [ :target | SoilQueueTestCompensatingEntry on: target ].
+	self crashAfterAnEffectOn: key.
+	txn := soil newTransaction.
+	[ queue := SoilQueueTestInterleavingQueue
+		onWorkspace: (self workspaceIn: txn)
+		configuredFrom: (SoilQueueDescription new
+			orphanedRetryLimit: 0;
+			yourself)
+		in: txn ] ensure: [ txn abort ].
+	queue interleave: [
+		self inTransaction: [ :other | (other root at: #target) addEffect: #meanwhile ] ].
+
+	self should: [ queue recover: (self currentKeyOf: key) ] raise: Error.
+	self assert: (soil reportedMatching: 'parked') isEmpty.
+	self assert: (self stateOf: key) equals: #claimed
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testAQueueThatStartsAgainGivesBackWhatTheRunBeforeLeft [
 	"a restart runs on the same instance. The question that was asked once per instance was
 	never asked again, so a worker that was taken away in the stop left its claim behind and
