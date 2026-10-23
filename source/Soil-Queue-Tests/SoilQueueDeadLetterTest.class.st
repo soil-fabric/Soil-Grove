@@ -26,14 +26,14 @@ Class {
 
 { #category : #helpers }
 SoilQueueDeadLetterTest >> deadLetters [
-	"each parked entry as its id and its state. By id, not by key: an entry that is given
-	back first waits, and its key moves with the time it waits for"
+	"each parked entry as its id. By id, not by key: an entry that is given back first
+	waits, and its key moves with the time it waits for"
 
 	| txn letters |
 	txn := soil newTransaction.
 	letters := OrderedCollection new.
 	^ [ (self workspaceIn: txn)
-		deadLettersDo: [ :key :entry | letters add: entry id -> entry state ].
+		deadLettersDo: [ :key :entry | letters add: entry id ].
 	  letters asArray ]
 		ensure: [ txn abort ]
 ]
@@ -136,6 +136,23 @@ SoilQueueDeadLetterTest >> testADeadLetterIsNotHandedOutAgain [
 ]
 
 { #category : #tests }
+SoilQueueDeadLetterTest >> testADeadLetterKeepsTheClaimOfItsLastAttempt [
+	"parked is where it lies, not a state of its own. The claim it was parked in stays and
+	says when its last attempt began, and parking writes nothing on it"
+
+	| txn claims |
+	self put: (SoilQueueTestUnreachableEntry on: 'gone').
+	self workOffEverything.
+
+	txn := soil newTransaction.
+	claims := OrderedCollection new.
+	[ (self workspaceIn: txn) deadLettersDo: [ :key :entry | claims add: entry claimedAt ] ]
+		ensure: [ txn abort ].
+	self assert: claims size equals: 1.
+	self assert: claims first notNil
+]
+
+{ #category : #tests }
 SoilQueueDeadLetterTest >> testADeadLetterIsParkedWhereItCanBeFound [
 	"work that disappears without a trace is worse than work that sits there unfinished"
 
@@ -144,7 +161,7 @@ SoilQueueDeadLetterTest >> testADeadLetterIsParkedWhereItCanBeFound [
 	self workOffEverything.
 
 	self assert: (self stateOf: key) equals: nil.
-	self assert: self deadLetters equals: { (self idOf: key) -> #deadLetter }
+	self assert: self deadLetters equals: { self idOf: key }
 ]
 
 { #category : #tests }
@@ -160,7 +177,7 @@ SoilQueueDeadLetterTest >> testAnEntryThatCannotBeWorkedOnComesBackBeforeItIsPar
 
 	self workOneUnit.
 	self assert: (self stateOf: key) equals: nil.
-	self assert: self deadLetters equals: { (self idOf: key) -> #deadLetter }
+	self assert: self deadLetters equals: { self idOf: key }
 ]
 
 { #category : #tests }
@@ -174,7 +191,7 @@ SoilQueueDeadLetterTest >> testAnEntryBehindADeadLetterStillGetsItsTurn [
 
 	self assert: (self stateOf: gone) equals: nil.
 	self assert: (self stateOf: good) equals: nil.
-	self assert: self deadLetters equals: { (self idOf: gone) -> #deadLetter }
+	self assert: self deadLetters equals: { self idOf: gone }
 ]
 
 { #category : #tests }

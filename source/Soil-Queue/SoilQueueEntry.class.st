@@ -2,8 +2,8 @@
 I am the wrapper that lies on a queue. Not the domain object itself: that keeps the
 queue generic and keeps the domain object free of execution state.
 
-What is generic is mine -- #state, #target and #claimedAt. What the work *is* belongs to
-my subclasses, and so does what holds after it was cut off. That seam is deliberately
+What is generic is mine -- #target and #claimedAt. What the work *is* belongs to my
+subclasses, and so does what holds after it was cut off. That seam is deliberately
 narrow: a queue must not know what the work does, what it costs, or which quota it
 counts against.
 
@@ -14,6 +14,14 @@ the whole graph together with me.
 
 I carry no field for my queue. Which queue I am on follows from the queue I lie in,
 and a second source for the same fact is a duplicate that can disagree.
+
+For the same reason I have no field for my state. I am pending or claimed, and #claimedAt
+says which: set from my claim until I am given back, nil before. Whether a worker still
+has me is not mine to know but the live queue's (#isHolding:). Done and parked are not
+states of mine but places. A finished entry has left the ordering and nothing refers to
+it any more; a parked one lies in the dead letters, with the claim of the attempt it was
+parked in. Saying so on me as well would be a second place for the same fact, and a
+write of every finished entry for nothing.
 
 Two of my fields end up in my key rather than only on me. #readyAt is the sort value,
 and it is a lower bound and not an appointment -- I am allowed to run from then on, not
@@ -73,7 +81,6 @@ Class {
 	#name : #SoilQueueEntry,
 	#superclass : #Object,
 	#instVars : [
-		'state',
 		'target',
 		'readyAt',
 		'claimedAt',
@@ -115,15 +122,18 @@ SoilQueueEntry >> claimAt: aDateAndTime [
 	MVCC a claim written by one worker is invisible to another's already-open
 	transaction, so exclusion is an in-memory mutex on the queue instead."
 
-	self isPending ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self expecting: #pending ].
-	state := #claimed.
+	self isPending ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self ].
 	claimedAt := aDateAndTime
 ]
 
 { #category : #accessing }
 SoilQueueEntry >> claimedAt [
-	"when the claim was taken, or nil while I am not claimed. What tells an orphaned
-	claim from a running one, once the queue also knows which entries its workers hold"
+	"when the claim was taken, or nil while I am not claimed -- the one field my state is
+	read off (#state). What tells an orphaned claim from a running one, once the queue also
+	knows which entries its workers hold.
+
+	A parked entry keeps it: when its last attempt began is what a reader of the dead
+	letters wants to know, and nobody hands out what lies there"
 
 	^ claimedAt
 ]
@@ -189,7 +199,6 @@ SoilQueueEntry >> id [
 SoilQueueEntry >> initialize [
 
 	super initialize.
-	state := #pending.
 	id := self class newId.
 	orphanedRetries := 0
 ]
@@ -197,48 +206,13 @@ SoilQueueEntry >> initialize [
 { #category : #testing }
 SoilQueueEntry >> isClaimed [
 
-	^ state == #claimed
-]
-
-{ #category : #testing }
-SoilQueueEntry >> isDeadLetter [
-
-	^ state == #deadLetter
-]
-
-{ #category : #testing }
-SoilQueueEntry >> isDone [
-
-	^ state == #done
+	^ claimedAt notNil
 ]
 
 { #category : #testing }
 SoilQueueEntry >> isPending [
 
-	^ state == #pending
-]
-
-{ #category : #accessing }
-SoilQueueEntry >> markDeadLetter [
-	"I could not be worked on at all -- my target is gone, my own materialization failed,
-	something about me is broken. Dead lettering is reserved for that, and it parks me
-	visibly instead of deleting me, because work that disappears without a trace is worse
-	than work that sits there unfinished. Failing *at* the work is a different thing and
-	ends in #markDone."
-
-	state := #deadLetter.
-	claimedAt := nil
-]
-
-{ #category : #accessing }
-SoilQueueEntry >> markDone [
-	"I am off the queue. Also the answer when the work unit failed for a reason of its
-	own: a domain failure is a result, not a queue problem, and the target carries its own
-	error state. Two places for the same fact would be one too many."
-
-	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self expecting: #claimed ].
-	state := #done.
-	claimedAt := nil
+	^ claimedAt isNil
 ]
 
 { #category : #accessing }
@@ -292,7 +266,7 @@ SoilQueueEntry >> performIn: aTransaction [
 SoilQueueEntry >> printOn: aStream [
 
 	super printOn: aStream.
-	aStream << ' ' << state
+	aStream << ' ' << self state
 ]
 
 { #category : #accessing }
@@ -322,8 +296,7 @@ SoilQueueEntry >> releaseClaim [
 	first -- a compensating entry is cleaned up there, a continuing one keeps its progress,
 	a repeating one starts over as it is."
 
-	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self expecting: #claimed ].
-	state := #pending.
+	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self ].
 	claimedAt := nil
 ]
 
@@ -347,9 +320,12 @@ SoilQueueEntry >> resumeAfterAbortIn: aTransaction [
 
 { #category : #accessing }
 SoilQueueEntry >> state [
-	"#pending, #claimed, #done or #deadLetter"
+	"#pending or #claimed, read off #claimedAt. In the dead letters it says nothing: being
+	there is what says that I am parked"
 
-	^ state
+	^ claimedAt
+		ifNil: [ #pending ]
+		ifNotNil: [ #claimed ]
 ]
 
 { #category : #accessing }

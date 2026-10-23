@@ -59,13 +59,13 @@ SoilQueueCrashTest >> currentKeyOf: aKey [
 
 { #category : #helpers }
 SoilQueueCrashTest >> deadLetters [
-	"each parked entry as its id, its state and how often in a row it was given back before"
+	"each parked entry as its id and how often in a row it was given back before"
 
 	| txn letters |
 	txn := soil newTransaction.
 	letters := OrderedCollection new.
 	[ (self workspaceIn: txn) deadLettersDo: [ :key :entry |
-		letters add: { entry id. entry state. entry orphanedRetries } ] ]
+		letters add: { entry id. entry orphanedRetries } ] ]
 		ensure: [ txn abort ].
 	^ letters asArray
 ]
@@ -242,9 +242,8 @@ SoilQueueCrashTest >> testACompensatingEntryIsCleanedUpBeforeItRunsAgain [
 ]
 
 { #category : #tests }
-SoilQueueCrashTest >> testACompensatingEntryThatIsParkedIsCleanedUpFirst [
-	"parked rather than given back, it is asked all the same, and before it is parked --
-	the entry refuses to clean up once its claim is gone. What the aborted attempt left
+SoilQueueCrashTest >> testACompensatingEntryThatIsParkedIsCleanedUpAllTheSame [
+	"parked rather than given back, it is asked all the same: what the aborted attempt left
 	behind does not stay lying under a dead letter"
 
 	| key |
@@ -253,7 +252,7 @@ SoilQueueCrashTest >> testACompensatingEntryThatIsParkedIsCleanedUpFirst [
 	self crashAfterAnEffectOn: key.
 	self queue recoverOrphanedClaims.
 
-	self assert: self deadLetters equals: { { self idOf: key. #deadLetter. 0 } }.
+	self assert: self deadLetters equals: { { self idOf: key. 0 } }.
 	self assert: self targetCompensations equals: #( 1 ).
 	self assert: self targetEffects equals: #(  )
 ]
@@ -294,7 +293,7 @@ SoilQueueCrashTest >> testAnEntryThatKeepsLosingItsWorkerIsParked [
 	self crashBeforeTheNextStepOn: key.
 	self queue recoverOrphanedClaims.
 	self assert: (self retriesOf: key) isNil.
-	self assert: self deadLetters equals: { { self idOf: key. #deadLetter. 2 } }
+	self assert: self deadLetters equals: { { self idOf: key. 2 } }
 ]
 
 { #category : #tests }

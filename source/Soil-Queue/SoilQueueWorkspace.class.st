@@ -148,11 +148,13 @@ SoilQueueWorkspace >> deadLetter: aKey [
 	"park an entry that could not be worked on at all, and take it out of the ordering.
 
 	Put first and removed second, so that an abort in between leaves it where it was rather
-	than nowhere. It keeps its key: it is the same entry, only somewhere else."
+	than nowhere. It keeps its key: it is the same entry, only somewhere else. It keeps its
+	claim too. Being here is what says it is parked, and the claim says when its last
+	attempt began; nobody hands out what lies here. Should one ever be taken back into the
+	ordering, it goes back unclaimed."
 
 	| entry |
 	entry := self entryAt: aKey.
-	entry markDeadLetter.
 	deadLetters at: aKey put: entry.
 	self removeKey: aKey.
 	^ entry
@@ -425,8 +427,9 @@ SoilQueueWorkspace >> printOn: aStream [
 
 { #category : #removing }
 SoilQueueWorkspace >> removeKey: aKey [
-	"take an entry out of the ordering. What the entry itself then says about why -- done,
-	failed at its work, dead lettered -- is written in the same transaction"
+	"take an entry out of the ordering. Nothing is written on the entry for it: why it left
+	-- done, failed at its work, parked -- is not the entry's to say. A parked one lies in
+	the dead letters, and the others are gone"
 
 	^ index removeKey: aKey
 ]
