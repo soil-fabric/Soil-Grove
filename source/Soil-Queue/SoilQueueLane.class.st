@@ -85,8 +85,7 @@ SoilQueueLane >> backoffCap: aDuration [
 { #category : #initialization }
 SoilQueueLane >> configureFrom: aDescription [
 	"take my values off a description, defaults included. Called when the queue is created
-	and at every start -- and only then. Another lane answers the same, which is how a lane
-	added to a running queue starts out like the default lane"
+	and at every start -- and only then"
 
 	orphanedRetryLimit := aDescription orphanedRetryLimit.
 	backoffBase := aDescription backoffBase.

@@ -1,6 +1,7 @@
 "
 A lane comes in by #addLane:format:, and the prefix is never the caller's: the workspace
-hands out the next free one and keeps it across starts.
+hands out the next free one and keeps it across starts. The lane takes entries at once and
+is handed out from from the next start on, like any setting.
 
 Room for more lanes than one is decided when the workspace is created, by its marker
 width. A workspace without markers has one lane over the whole index and no room for a
@@ -140,35 +141,24 @@ SoilQueueAddLaneTest >> testAnAddedLaneIsStored [
 ]
 
 { #category : #tests }
-SoilQueueAddLaneTest >> testAnAddedLaneRunsAtOnce [
-	"added on a running queue, the lane is handed out from right away -- a lane that took
-	entries it would not hand out until the next start would only collect them"
+SoilQueueAddLaneTest >> testAnAddedLaneRunsFromTheNextStart [
+	"added on a queue that runs, the lane takes entries at once and is handed out from at
+	the next start, like any setting. A queue without a resident starts where it is created
+	on its workspace"
 
 	| queue |
 	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
 	queue := self queue.
 	queue addLane: #b format: self format.
-	self put: 2 into: #b.
-	self put: 1 into: #default.
+	self inTransaction: [ :txn |
+		queue add: (SoilQueueTestEntry on: 'work') to: #b in: txn ].
+	self should: [ queue lane: #b ] raise: Error.
+	(SoilQueueWorker on: queue) run.
+	self assert: self left equals: 1.
 
-	(SoilQueueWorker on: queue lane: (queue lane: #b)) run.
-	self assert: self left equals: 1
-]
-
-{ #category : #tests }
-SoilQueueAddLaneTest >> testAnAddedLaneRunsLikeTheDefaultLane [
-	"until the next start configures it, a new lane takes the values of the default lane,
-	its worker limit among them"
-
-	| queue lane |
-	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
 	queue := self queue.
-	queue defaultLane
-		backoffBase: 1 minute;
-		workerLimit: 3.
-	lane := queue addLane: #b format: self format.
-	self assert: lane backoffBase equals: 1 minute.
-	self assert: lane workerLimit equals: 3
+	(SoilQueueWorker on: queue lane: (queue lane: #b)) run.
+	self assert: self left equals: 0
 ]
 
 { #category : #tests }
@@ -178,8 +168,8 @@ SoilQueueAddLaneTest >> testAnEntryPutInThroughTheQueueGoesToTheFirstLane [
 
 	| queue |
 	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
+	self queue addLane: #b format: self format.
 	queue := self queue.
-	queue addLane: #b format: self format.
 	self inTransaction: [ :txn |
 		queue add: (SoilQueueTestEntry on: 'work') in: txn ].
 	self assert: self left equals: 1.
@@ -195,8 +185,8 @@ SoilQueueAddLaneTest >> testAnEntryPutIntoALaneIsWorkedByThatLane [
 
 	| queue |
 	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
+	self queue addLane: #b format: self format.
 	queue := self queue.
-	queue addLane: #b format: self format.
 	self inTransaction: [ :txn |
 		queue add: (SoilQueueTestEntry on: 'work') to: #b in: txn ].
 	self assert: self left equals: 1.

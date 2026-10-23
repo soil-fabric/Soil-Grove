@@ -22,7 +22,8 @@ has.
 
 How wide the marker is, is decided when I am created, and with it how many lanes I can
 hold: none wide means one lane over the whole index, one byte means up to 256. A lane
-comes in by #addLaneNamed:format:, and I hand out its marker -- the lowest free one.
+comes in by #addLaneNamed:format:, and I hand out its marker -- the lowest free one. No
+lane goes out again.
 "
 Class {
 	#name : #SoilQueueWorkspace,
@@ -109,8 +110,9 @@ SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 { #category : #lanes }
 SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 	"a lane behind the lowest marker no lane has, and answer it. The caller never picks a
-	marker, so two lanes cannot collide on one, and a lane keeps its marker for as long as
-	it is there -- it is written into every key of it.
+	marker, so two lanes cannot collide on one, and a lane keeps its marker -- it is written
+	into every key of it. No lane is taken out again, so no marker is freed, and the lowest
+	free one is the one after the last.
 
 	Stored with me, in the transaction I was read in; I do not commit"
 
@@ -432,29 +434,6 @@ SoilQueueWorkspace >> removeKey: aKey [
 	the dead letters, and the others are gone"
 
 	^ index removeKey: aKey
-]
-
-{ #category : #lanes }
-SoilQueueWorkspace >> removeLaneNamed: aSymbol discardingEntries: aBoolean [
-	"take a lane out, and its marker is free again. Only an empty one, unless aBoolean says
-	to take its entries and dead letters along -- parked work is otherwise never deleted,
-	and a lane that goes must leave nothing under its marker for the next lane to find.
-
-	The default lane stays. In the transaction I was read in; I do not commit"
-
-	| lane keys parked |
-	lane := self laneNamed: aSymbol.
-	lane == self defaultLane ifTrue: [ ^ self error: 'the default lane cannot be removed' ].
-	keys := OrderedCollection new.
-	self keysAndEntriesIn: lane do: [ :key :entry | keys add: key ].
-	parked := OrderedCollection new.
-	self deadLettersDo: [ :key :entry | (lane includesKey: key) ifTrue: [ parked add: key ] ].
-	(aBoolean not and: [ keys notEmpty or: [ parked notEmpty ] ]) ifTrue: [
-		^ self error: 'the lane ' , aSymbol printString , ' still has ' , keys size printString
-			, ' entries and ' , parked size printString , ' dead letters' ].
-	keys do: [ :each | index removeKey: each ].
-	parked do: [ :each | deadLetters removeKey: each ].
-	lanes remove: lane
 ]
 
 { #category : #enumerating }
