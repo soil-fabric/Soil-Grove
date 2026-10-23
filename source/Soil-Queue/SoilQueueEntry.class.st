@@ -23,15 +23,13 @@ it any more; a parked one lies in the dead letters, with the claim of the attemp
 parked in. Saying so on me as well would be a second place for the same fact, and a
 write of every finished entry for nothing.
 
-Two of my fields end up in my key rather than only on me. #readyAt is the sort value,
-and it is a lower bound and not an appointment -- I am allowed to run from then on, not
-scheduled for then, because the workers of my lane can all be busy for arbitrarily long.
-#id is what makes the key unique, which the index needs: moving a key is refused on an
-index with duplicate keys, and moving a key is what backoff does.
-
-On a grouped lane it is #groupId instead of #readyAt that ends up in the key: my
-group, then my place in it, then #id. #readyAt stays with me there and is read from
-me, so a backoff holds up my group rather than moving me to its end.
+On a lane ordered by due time two of my fields end up in my key rather than only on me.
+#readyAt is the sort value, and it is a lower bound and not an appointment -- I am
+allowed to run from then on, not scheduled for then, because the workers of my lane can
+all be busy for arbitrarily long. #id is what makes the key unique, which the index needs:
+moving a key is refused on an index with duplicate keys, and moving a key is what backoff
+does there. A grouped lane keys me by my group instead and leaves #readyAt on me, so a
+backoff holds up my group where I am (SoilQueueGroupedKeyFormat).
 
 An abort leaves one question open, and the queue cannot answer it for me: *what holds
 afterwards*. An image can crash at any moment and a rolling release interrupts work as a
@@ -45,6 +43,14 @@ There are three answers, and a subclass gives one of them and says which --
 	              assumption, and the hook has nothing to do
 	compensating  clean up what the aborted attempt left behind, in the hook, then
 	              start over
+
+Where a continuing entry keeps its progress is its own business, not mine: a target with
+a state machine of its own knows how far it got, and a field of the subclass does
+otherwise -- a second one beside a target that knows would be a duplicate that can
+disagree. Whichever it is, the progress is set *after* the effect it stands for, never
+before. A crash between the effect and the commit then costs a repetition; the other
+order loses the effect entirely, and the queue promises at least once rather than
+exactly once.
 
 I count how often I was given back: #orphanedRetries, once for each time I was found
 claimed with no worker holding me -- my worker went away, a crash, a deploy, a rolling
@@ -85,9 +91,7 @@ Class {
 		'readyAt',
 		'claimedAt',
 		'id',
-		'progress',
-		'orphanedRetries',
-		'groupId'
+		'orphanedRetries'
 	],
 	#category : #'Soil-Queue'
 }
@@ -173,19 +177,13 @@ SoilQueueEntry >> giveUp: anError in: aTransaction [
 
 { #category : #accessing }
 SoilQueueEntry >> groupId [
-	"the group I belong to on a grouped lane: of one group, only one entry is out at a time,
-	and they go out in the order they came in. An integer or a byte array of the width the
-	lane's format says. On any other lane nobody asks"
+	"the group I belong to on a grouped lane, a non-negative integer: of one group, only one
+	entry is out at a time, and they go out in the order they came in. Nil here -- an entry
+	for a grouped lane answers it itself, off its target say. Read once, when I am put in;
+	from then on my key holds the group (SoilQueueGroupedKeyFormat). On any other lane
+	nobody asks"
 
-	^ groupId
-]
-
-{ #category : #accessing }
-SoilQueueEntry >> groupId: anIntegerOrByteArray [
-	"set before I am put into a queue: the group is written into my key there and does not
-	change with me afterwards"
-
-	groupId := anIntegerOrByteArray
+	^ nil
 ]
 
 { #category : #accessing }
@@ -267,26 +265,6 @@ SoilQueueEntry >> printOn: aStream [
 
 	super printOn: aStream.
 	aStream << ' ' << self state
-]
-
-{ #category : #accessing }
-SoilQueueEntry >> progress [
-	"where a resumable unit of work had got to, or nil when it never started.
-
-	Only for entries that have no state machine of their own. A target that knows its own
-	progress is the better place for it, and a second field beside it would be a duplicate
-	that can disagree -- the wrapper then only says 'not finished', not where it stands."
-
-	^ progress
-]
-
-{ #category : #accessing }
-SoilQueueEntry >> progress: anObject [
-	"set this *after* the effect it stands for, never before. A crash between the effect
-	and the commit then costs a repetition; the other order loses the effect entirely, and
-	the queue promises at least once rather than exactly once."
-
-	progress := anObject
 ]
 
 { #category : #accessing }

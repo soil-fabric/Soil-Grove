@@ -59,10 +59,14 @@ SoilQueueLaneTest >> path [
 SoilQueueLaneTest >> put: anInteger into: aWorkspaceBlock [
 
 	self inTransaction: [ :txn |
+		| workspace |
+		workspace := aWorkspaceBlock value: txn.
 		anInteger timesRepeat: [
-			(aWorkspaceBlock value: txn) add: ((SoilQueueTestEntry on: 'work')
-				readyAt: clock now;
-				yourself) ] ]
+			workspace
+				add: ((SoilQueueTestEntry on: 'work')
+					readyAt: clock now;
+					yourself)
+				to: workspace defaultLane ] ]
 ]
 
 { #category : #helpers }

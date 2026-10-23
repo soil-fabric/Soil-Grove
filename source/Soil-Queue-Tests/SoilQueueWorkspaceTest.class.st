@@ -53,12 +53,15 @@ SoilQueueWorkspaceTest >> path [
 
 { #category : #helpers }
 SoilQueueWorkspaceTest >> put: anEntry [
-	"add an entry in a transaction of its own, the way an embedder would"
+	"add an entry in a transaction of its own, the way an embedder would -- ready now
+	unless it says otherwise, which is what the queue would make it"
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ | key |
-	  key := (self workspaceIn: txn) add: anEntry.
+	^ [ | workspace key |
+	  workspace := self workspaceIn: txn.
+	  anEntry readyAt ifNil: [ anEntry readyAt: DateAndTime now ].
+	  key := workspace add: anEntry to: workspace defaultLane.
 	  txn commit.
 	  key ]
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
@@ -138,6 +141,27 @@ SoilQueueWorkspaceTest >> testAnEmptyQueueHasNoNextTimeToOfferEither [
 			ifNone: [ :time | time ])
 		equals: nil.
 	txn abort
+]
+
+{ #category : #tests }
+SoilQueueWorkspaceTest >> testAnEntryThatSaysNoTimeIsRefused [
+	"the time is the queue's to give, by the queue's clock -- given here, it would be the
+	wall clock past a queue that has a clock of its own"
+
+	| txn |
+	self addQueue.
+	txn := soil newTransaction.
+	[ | workspace count |
+	  workspace := self workspaceIn: txn.
+	  self
+		should: [ workspace add: (SoilQueueTestEntry on: 'work') to: workspace defaultLane ]
+		raise: Error
+		withExceptionDo: [ :error |
+			self assert: (error messageText includesSubstring: 'says nothing about when it may run') ].
+	  count := 0.
+	  workspace keysAndEntriesDo: [ :key :entry | count := count + 1 ].
+	  self assert: count equals: 0 ]
+		ensure: [ txn abort ]
 ]
 
 { #category : #tests }

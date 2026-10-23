@@ -15,10 +15,26 @@ Class {
 }
 
 { #category : #helpers }
+SoilQueueGroupedLaneTest >> assertRefused: anEntry [
+	"refused before anything is written: the transaction the entry was tried in, which sees
+	what it added itself, holds nothing of it either"
+
+	| txn |
+	txn := soil newTransaction.
+	[ | workspace count |
+	  workspace := self workspaceIn: txn.
+	  self should: [ workspace add: anEntry to: (self lane: txn) ] raise: Error.
+	  count := 0.
+	  workspace keysAndEntriesIn: (self lane: txn) do: [ :key :entry | count := count + 1 ].
+	  self assert: count equals: 0 ]
+		ensure: [ txn abort ]
+]
+
+{ #category : #helpers }
 SoilQueueGroupedLaneTest >> entryIn: aGroup [
 
-	^ (SoilQueueTestEntry on: 'work')
-		groupId: aGroup;
+	^ (SoilQueueTestGroupedEntry on: 'work' group: aGroup)
+		readyAt: DateAndTime now;
 		yourself
 ]
 
@@ -158,10 +174,27 @@ SoilQueueGroupedLaneTest >> testAnEntryOfAGroupStaysPutWhenItsDueTimeChanges [
 ]
 
 { #category : #tests }
+SoilQueueGroupedLaneTest >> testANegativeGroupIsRefused [
+	"eight bytes would drop the sign without a word, and -5 would share a group with 5"
+
+	self assertRefused: (self entryIn: -5)
+]
+
+{ #category : #tests }
+SoilQueueGroupedLaneTest >> testAnEntryThatSaysNoTimeIsRefused [
+	"the lane the refusal is there for: the time is not in a grouped key, so nothing else
+	stops an entry without one, and it would lie in its group as the first one that can
+	never be asked whether it is due"
+
+	self assertRefused: (SoilQueueTestGroupedEntry on: 'work' group: 7)
+]
+
+{ #category : #tests }
 SoilQueueGroupedLaneTest >> testAnEntryWithoutAGroupIsRefused [
 
-	self should: [ self put: (SoilQueueTestEntry on: 'work') ] raise: Error.
-	self assert: self keysOfGroupsLane isEmpty
+	self assertRefused: ((SoilQueueTestEntry on: 'work')
+		readyAt: DateAndTime now;
+		yourself)
 ]
 
 { #category : #tests }

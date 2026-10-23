@@ -68,8 +68,9 @@ SoilQueueWakeTest >> put: anEntry [
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ | key |
-	  key := (self workspaceIn: txn) add: anEntry.
+	^ [ | workspace key |
+	  workspace := self workspaceIn: txn.
+	  key := workspace add: anEntry to: workspace defaultLane.
 	  txn commit.
 	  key ]
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]

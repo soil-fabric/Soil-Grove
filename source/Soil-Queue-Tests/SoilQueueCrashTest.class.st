@@ -130,10 +130,15 @@ SoilQueueCrashTest >> path [
 
 { #category : #helpers }
 SoilQueueCrashTest >> put: aBlock [
-	"aBlock builds the entry on the target read in the same transaction"
+	"aBlock builds the entry on the target read in the same transaction. One that says
+	nothing about when it may run is ready now, as the queue would make it"
 
 	^ self inTransaction: [ :txn |
-		(self workspaceIn: txn) add: (aBlock value: (txn root at: #target)) ]
+		| workspace entry |
+		workspace := self workspaceIn: txn.
+		entry := aBlock value: (txn root at: #target).
+		entry readyAt ifNil: [ entry readyAt: DateAndTime now ].
+		workspace add: entry to: workspace defaultLane ]
 ]
 
 { #category : #helpers }

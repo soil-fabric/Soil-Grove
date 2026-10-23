@@ -119,6 +119,9 @@ SoilQueue >> add: anEntry to: aLaneName in: aTransaction [
 	no lane of mine is refused before anything is written: an entry under a prefix that
 	no lane owns would be found by nobody, and by the next lane that is given the prefix.
 
+	The one place an entry that says nothing about when it may run is made ready now, by
+	my clock; my workspace refuses one.
+
 	The answer is the key, in the form the index compares in."
 
 	| workspace |
