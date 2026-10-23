@@ -16,7 +16,8 @@ I carry no field for my queue. Which queue I am on follows from the queue I lie 
 and a second source for the same fact is a duplicate that can disagree.
 
 For the same reason I have no field for my state. I am pending or claimed, and #claimedAt
-says which: set while a worker has me, nil while nobody does. Done and parked are not
+says which: set from my claim until I am given back, nil before. Whether a worker still
+has me is not mine to know but the live queue's (#isHolding:). Done and parked are not
 states of mine but places. A finished entry has left the ordering and nothing refers to
 it any more; a parked one lies in the dead letters, with the claim of the attempt it was
 parked in. Saying so on me as well would be a second place for the same fact, and a

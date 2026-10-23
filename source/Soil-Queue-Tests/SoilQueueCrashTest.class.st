@@ -242,9 +242,8 @@ SoilQueueCrashTest >> testACompensatingEntryIsCleanedUpBeforeItRunsAgain [
 ]
 
 { #category : #tests }
-SoilQueueCrashTest >> testACompensatingEntryThatIsParkedIsCleanedUpFirst [
-	"parked rather than given back, it is asked all the same, and before it is parked --
-	the entry refuses to clean up once its claim is gone. What the aborted attempt left
+SoilQueueCrashTest >> testACompensatingEntryThatIsParkedIsCleanedUpAllTheSame [
+	"parked rather than given back, it is asked all the same: what the aborted attempt left
 	behind does not stay lying under a dead letter"
 
 	| key |

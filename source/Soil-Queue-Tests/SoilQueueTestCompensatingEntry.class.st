@@ -6,8 +6,9 @@ My cleanup takes the last effect off my target and notes how many it found there
 can then see both that it ran and that it ran *before* the fresh attempt.
 
 It cleans up after the attempt that still holds my claim, so it refuses to run without
-one: asked after the queue has already given me back or parked me, it would clean up
-after nobody. That holds the queue to asking first.
+one: asked after the queue has already given me back, it would clean up after nobody.
+That holds the queue to asking first. Parking leaves my claim where it is and writes
+nothing on me, so there the order is one that nobody can see.
 "
 Class {
 	#name : #SoilQueueTestCompensatingEntry,
