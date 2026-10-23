@@ -47,7 +47,6 @@ Class {
 	#name : #SoilQueue,
 	#superclass : #SoilActiveResident,
 	#instVars : [
-		'name',
 		'mutex',
 		'inFlight',
 		'recovered',
@@ -71,7 +70,6 @@ SoilQueue class >> onWorkspace: aQueueWorkspace configuredFrom: aDescription in:
 	lines it emits. It supervises nothing: the queue is not registered anywhere"
 
 	^ self new
-		name: #queue;
 		supervisor: aTransaction soil newResidentSupervisor;
 		workspaceId: (aTransaction objectIdOf: aQueueWorkspace);
 		configureFrom: aDescription in: aTransaction;
@@ -403,23 +401,17 @@ SoilQueue >> liveLanes [
 	different answer than a lane that is not there: the lane may well be in my workspace,
 	waiting for the start that builds it"
 
-	self hasLiveLanes ifFalse: [ ^ self error: 'the queue ' , name printString , ' is not started' ].
+	self hasLiveLanes ifFalse: [ ^ self error: 'the queue ' , self name printString , ' is not started' ].
 	^ lanes
 ]
 
 { #category : #accessing }
 SoilQueue >> name [
-	"carried rather than looked up: my name ends up in a process name and in status lines,
-	and a transaction for a label would be one too many -- sometimes while another one is
-	already open"
+	"the same as my description's, one queue to a database. A constant, so that a process
+	name or a status line needs no transaction -- sometimes while another one is already
+	open"
 
-	^ name
-]
-
-{ #category : #accessing }
-SoilQueue >> name: aSymbol [
-
-	name := aSymbol
+	^ #queue
 ]
 
 { #category : #accessing }

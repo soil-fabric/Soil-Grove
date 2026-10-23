@@ -41,7 +41,7 @@ SoilQueueDeadLetterTest >> deadLetters [
 { #category : #helpers }
 SoilQueueDeadLetterTest >> descriptionIn: aTransaction [
 
-	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
+	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
 ]
 
 { #category : #helpers }
@@ -92,7 +92,6 @@ SoilQueueDeadLetterTest >> setUp [
 		initializeFilesystem;
 		initializeRoot.
 	soil addResidentDescription: ((SoilQueueDescription
-		named: #work
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24)
 		orphanedRetryLimit: 1;

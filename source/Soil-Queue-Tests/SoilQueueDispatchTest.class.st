@@ -21,7 +21,7 @@ Class {
 { #category : #helpers }
 SoilQueueDispatchTest >> descriptionIn: aTransaction [
 
-	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
+	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
 ]
 
 { #category : #helpers }
@@ -89,7 +89,6 @@ SoilQueueDispatchTest >> setUp [
 		initializeFilesystem;
 		initializeRoot.
 	soil addResidentDescription: (SoilQueueDescription
-		named: #work
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24).
 	self inTransaction: [ :txn |

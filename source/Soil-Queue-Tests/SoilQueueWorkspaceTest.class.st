@@ -17,10 +17,9 @@ Class {
 }
 
 { #category : #helpers }
-SoilQueueWorkspaceTest >> addQueueNamed: aSymbol [
+SoilQueueWorkspaceTest >> addQueue [
 
 	^ soil addResidentDescription: (SoilQueueDescription
-		named: aSymbol
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24)
 ]
@@ -28,7 +27,7 @@ SoilQueueWorkspaceTest >> addQueueNamed: aSymbol [
 { #category : #helpers }
 SoilQueueWorkspaceTest >> descriptionIn: aTransaction [
 
-	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
+	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
 ]
 
 { #category : #helpers }
@@ -91,7 +90,7 @@ SoilQueueWorkspaceTest >> testAClaimedEntryIsPassedByWhenWorkIsSelected [
 	worker"
 
 	| txn claimed next |
-	self addQueueNamed: #work.
+	self addQueue.
 	claimed := self put: (self entryDueIn: 1 seconds).
 	next := self put: (self entryDueIn: 10 seconds).
 	txn := soil newTransaction.
@@ -114,7 +113,7 @@ SoilQueueWorkspaceTest >> testAKeyCarriesTheDueTimeInFrontOfTheId [
 	of the section and finding work is a lookup rather than a search"
 
 	| description entry key |
-	description := self addQueueNamed: #work.
+	description := self addQueue.
 	entry := self entryDueIn: 0 seconds.
 	key := description workspace defaultLane keyFor: entry in: description workspace.
 	self assert: key size equals: 24.
@@ -130,7 +129,7 @@ SoilQueueWorkspaceTest >> testAnEmptyQueueHasNoNextTimeToOfferEither [
 	has to tell them apart: one is a wait, the other is a wait for a notification"
 
 	| txn |
-	self addQueueNamed: #work.
+	self addQueue.
 	txn := soil newTransaction.
 	self
 		assert: ((self workspaceIn: txn)
@@ -145,7 +144,7 @@ SoilQueueWorkspaceTest >> testAnEmptyQueueHasNoNextTimeToOfferEither [
 SoilQueueWorkspaceTest >> testEntriesComeOutOldestDueFirst [
 
 	| txn early |
-	self addQueueNamed: #work.
+	self addQueue.
 	self put: (self entryDueIn: 10 seconds).
 	early := self put: (self entryDueIn: 1 seconds).
 
@@ -164,7 +163,7 @@ SoilQueueWorkspaceTest >> testNothingDueAnswersWhenTheNextOneIs [
 	"so a caller sleeps exactly as long as it has to instead of coming back to ask"
 
 	| txn due |
-	self addQueueNamed: #work.
+	self addQueue.
 	due := DateAndTime now + 1 hour.
 	self put: ((self entryDueIn: 0 seconds) readyAt: due; yourself).
 
@@ -182,7 +181,7 @@ SoilQueueWorkspaceTest >> testNothingDueAnswersWhenTheNextOneIs [
 SoilQueueWorkspaceTest >> testTakingAnEntryOutLeavesTheNextOne [
 
 	| txn first second |
-	self addQueueNamed: #work.
+	self addQueue.
 	first := self put: (self entryDueIn: 0 seconds).
 	second := self put: (self entryDueIn: 1 seconds).
 
@@ -207,7 +206,7 @@ SoilQueueWorkspaceTest >> testTheWorkspaceBringsItsShapeBackFromDisk [
 	workspace has one lane, #default"
 
 	| txn workspace |
-	self addQueueNamed: #work.
+	self addQueue.
 	txn := soil newTransaction.
 	workspace := self workspaceIn: txn.
 	self assert: (workspace lanes collect: [ :each | each name ]) equals: #( #default ).
@@ -222,7 +221,7 @@ SoilQueueWorkspaceTest >> testTheWorkspaceIsAClusterRootOfItsOwn [
 	"what lets the resident reach it by id, without reading its description"
 
 	| txn description |
-	self addQueueNamed: #work.
+	self addQueue.
 	txn := soil newTransaction.
 	description := self descriptionIn: txn.
 	self assert: description workspaceId notNil.

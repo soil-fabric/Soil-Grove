@@ -28,15 +28,14 @@ and the dead letters roots in turn. That also spares the queue a trap: Soil send
 because the class says #isSoilClusterRoot -- so an index that only ever arrived by
 reference would be stored with no transaction at all.
 
-My name is an instance variable rather than a constant of my class, which is where the
-resident system usually puts it. A queue is created at runtime and there can be many,
-and the registry keys by name.
+My name is a constant, #queue, as for every pair of resident and description: one queue
+to a database. A second queue in one database would be a pair of subclasses with a name
+of its own.
 "
 Class {
 	#name : #SoilQueueDescription,
 	#superclass : #SoilResidentDescription,
 	#instVars : [
-		'name',
 		'workerLimit',
 		'orphanedRetryLimit',
 		'backoffBase',
@@ -47,20 +46,13 @@ Class {
 }
 
 { #category : #'instance creation' }
-SoilQueueDescription class >> named: aSymbol timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes [
-	"the ordinary queue: an index of its own, ordered by due time"
-
-	^ self
-		named: aSymbol
-		workspace: (SoilQueueWorkspace timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes)
-]
-
-{ #category : #'instance creation' }
-SoilQueueDescription class >> named: aSymbol workspace: aQueueWorkspace [
+SoilQueueDescription class >> timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes [
+	"the ordinary queue: an index of its own, ordered by due time. Any other workspace is
+	handed to a new one of me (#workspace:)"
 
 	^ self new
-		setName: aSymbol
-		workspace: aQueueWorkspace
+		workspace: (SoilQueueWorkspace timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes);
+		yourself
 ]
 
 { #category : #retrying }
@@ -158,20 +150,9 @@ SoilQueueDescription >> instanceClass [
 
 { #category : #accessing }
 SoilQueueDescription >> name [
+	"the registry key, the same for every queue -- see my class comment"
 
-	^ name
-]
-
-{ #category : #'instance creation' }
-SoilQueueDescription >> newInstanceIn: aTransaction [
-	"the name goes along, so the live queue can answer for itself what it is called
-	without opening a transaction for a label. The configuration does not: the queue builds
-	its lanes from my workspace and my values when it starts, and a queue that is loaded
-	and never started -- switched off -- has nothing to build them for"
-
-	^ (super newInstanceIn: aTransaction)
-		name: name;
-		yourself
+	^ #queue
 ]
 
 { #category : #accessing }
@@ -205,14 +186,7 @@ SoilQueueDescription >> orphanedRetryLimit: anInteger forLane: aSymbol [
 SoilQueueDescription >> printOn: aStream [
 
 	super printOn: aStream.
-	aStream << ' ' << name
-]
-
-{ #category : #initialization }
-SoilQueueDescription >> setName: aSymbol workspace: aQueueWorkspace [
-
-	name := aSymbol.
-	workspace := aQueueWorkspace
+	aStream << ' ' << self name
 ]
 
 { #category : #lanes }

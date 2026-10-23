@@ -25,7 +25,7 @@ Class {
 { #category : #helpers }
 SoilQueueWakeTest >> descriptionIn: aTransaction [
 
-	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
+	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
 ]
 
 { #category : #helpers }
@@ -104,7 +104,6 @@ SoilQueueWakeTest >> setUp [
 		initializeFilesystem;
 		initializeRoot.
 	soil addResidentDescription: (SoilQueueDescription
-		named: #work
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24)
 ]
