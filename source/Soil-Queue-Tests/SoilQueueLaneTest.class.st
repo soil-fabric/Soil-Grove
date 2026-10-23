@@ -211,6 +211,30 @@ SoilQueueLaneTest >> testAQueueThatIsNotStartedSaysSo [
 ]
 
 { #category : #tests }
+SoilQueueLaneTest >> testWithoutAResidentChangedValuesComeByConfiguringAgain [
+	"a start keeps the lanes of a queue without a resident; its creator hands it a changed
+	description, and the lanes are built anew from it, as a start would"
+
+	| workspace queue txn |
+	self inTransaction: [ :t |
+		| created |
+		created := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24.
+		t root at: #queue put: created.
+		t makeRoot: created.
+		created initializeIn: t ].
+	workspace := [ :aTransaction | aTransaction root at: #queue ].
+	txn := soil newTransaction.
+	[ queue := SoilQueue onWorkspace: (workspace value: txn) in: txn.
+	  queue
+		configureFrom: (SoilQueueDescription new
+			backoffBase: 1 minute;
+			yourself)
+		in: txn ] ensure: [ txn abort ].
+
+	self assert: (queue lane: #default) backoffBase equals: 1 minute
+]
+
+{ #category : #tests }
 SoilQueueLaneTest >> testWithoutAResidentTheValuesComeFromADescriptionThatIsNotStored [
 	"no stored description to read them from, so whoever creates the queue hands it one.
 	Without one, the defaults hold"

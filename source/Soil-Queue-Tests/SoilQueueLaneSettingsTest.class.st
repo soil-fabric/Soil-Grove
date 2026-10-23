@@ -95,7 +95,9 @@ SoilQueueLaneSettingsTest >> testALaneSettingIsCheckedWhenItIsSet [
 		self should: [ description orphanedRetryLimit: -1 forLane: #b ] raise: Error.
 		self should: [ description workerLimit: 0 forLane: #b ] raise: Error.
 		self should: [ description orphanedRetryLimit: -1 ] raise: Error.
-		self should: [ description workerLimit: 0 ] raise: Error ]
+		self should: [ description workerLimit: 0 ] raise: Error.
+		self should: [ description backoffBase: nil forLane: #b ] raise: Error.
+		self should: [ description backoffCap: -1 seconds ] raise: Error ]
 ]
 
 { #category : #tests }
@@ -112,6 +114,23 @@ SoilQueueLaneSettingsTest >> testALaneSetToNoLimitHasNone [
 
 	self assert: (queue lane: #b) orphanedRetryLimit isNil.
 	self assert: (queue lane: #c) orphanedRetryLimit equals: 5
+]
+
+{ #category : #tests }
+SoilQueueLaneSettingsTest >> testARefusedSettingThatIsProceededIsNotStored [
+	"proceeded in the debugger, a refusal returns -- and what it refused is not stored all
+	the same. Nothing checks it again later"
+
+	| description proceed |
+	description := SoilQueueDescription new.
+	proceed := [ :aBlock | aBlock on: Error do: [ :error | error resumeUnchecked: nil ] ].
+	proceed value: [ description workerLimit: 0 ].
+	proceed value: [ description orphanedRetryLimit: -1 forLane: #b ].
+	proceed value: [ description backoffBase: nil forLane: #b ].
+
+	self assert: description workerLimit equals: 1.
+	self assert: (description valueAt: #orphanedRetryLimit forLane: #b) isNil.
+	self assert: (description valueAt: #backoffBase forLane: #b) equals: 1 second
 ]
 
 { #category : #tests }

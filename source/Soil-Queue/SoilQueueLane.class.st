@@ -5,11 +5,11 @@ A lane is a place the queue hands entries out from, with a limit for entries giv
 a backoff and a worker limit of its own -- how many of its workers may run at once.
 Lanes share no places. Its stored half, SoilQueueLaneDescription, lies in the workspace
 and says where its entries are; I say how they are tried again. The queue builds me from
-both when it is created and again at every start, and after that nobody reads the
-configuration for me: a changed setting holds from the next start on, the way it does
-for a resident. Without a resident, they come from a description that is never stored,
-handed to the queue where it is created. I have no setters: my description is the one
-place the values are set and checked.
+both, and after that nobody reads the configuration for me. With a resident it does so at
+every start, so a changed setting holds from the next start on. Without one, it does so
+where it is created on its workspace, from a description that is never stored, and again
+when its creator configures it anew. I have no setters for these values: a description
+is the one place they are set and checked.
 
 What I decide: whether an entry that was given back may come back once more, and how long
 it waits before it does.
@@ -67,8 +67,8 @@ SoilQueueLane >> backoffCap [
 { #category : #initialization }
 SoilQueueLane >> configureFrom: aDescription [
 	"take the values that hold for me off a description: what is set for me, else what is
-	set for all lanes, else the defaults (#valueAt:forLane:). Called when the queue is
-	created and at every start -- and only then"
+	set for all lanes, else the defaults (#valueAt:forLane:). Called when the queue builds
+	its lanes, and only then"
 
 	orphanedRetryLimit := aDescription valueAt: #orphanedRetryLimit forLane: name.
 	backoffBase := aDescription valueAt: #backoffBase forLane: name.
