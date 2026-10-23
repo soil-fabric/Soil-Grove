@@ -1,7 +1,8 @@
 "
 A lane comes in by #addLane:format:, and the prefix is never the caller's: the workspace
 hands out the next free one and keeps it across starts. The lane takes entries at once and
-is handed out from from the next start on, like any setting.
+is handed out from when the queue's lanes are built next, like any setting -- for the
+queues here, which have no resident, where a queue is created on the workspace.
 
 Room for more lanes than one is decided when the workspace is created, by its marker
 width. A workspace without markers has one lane over the whole index and no room for a
@@ -142,9 +143,9 @@ SoilQueueAddLaneTest >> testAnAddedLaneIsStored [
 
 { #category : #tests }
 SoilQueueAddLaneTest >> testAnAddedLaneRunsFromTheNextStart [
-	"added on a queue that runs, the lane takes entries at once and is handed out from at
-	the next start, like any setting. A queue without a resident starts where it is created
-	on its workspace"
+	"added on a queue that runs, the lane takes entries at once and is handed out from when
+	the lanes are built next, like any setting. A queue without a resident has its lanes
+	built where it is created on its workspace"
 
 	| queue |
 	self storeWorkspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1).
@@ -152,7 +153,10 @@ SoilQueueAddLaneTest >> testAnAddedLaneRunsFromTheNextStart [
 	queue addLane: #b format: self format.
 	self inTransaction: [ :txn |
 		queue add: (SoilQueueTestEntry on: 'work') to: #b in: txn ].
-	self should: [ queue lane: #b ] raise: Error.
+	self
+		should: [ queue lane: #b ]
+		raise: Error
+		withExceptionDo: [ :error | self assert: (error messageText includesSubstring: 'no live lane') ].
 	(SoilQueueWorker on: queue) run.
 	self assert: self left equals: 1.
 
@@ -210,6 +214,31 @@ SoilQueueAddLaneTest >> testNoEntryIsPutIntoALaneThatIsNotThere [
 			queue add: (SoilQueueTestEntry on: 'work') to: #nowhere in: txn ] ]
 		raise: Error.
 	self assert: self left equals: 0
+]
+
+{ #category : #tests }
+SoilQueueAddLaneTest >> testAGapInTheMarkersIsFilledFirst [
+	"lanes laid out by hand, or taken out while that was still possible, can leave a marker
+	free below the last one. It is the lowest free one"
+
+	| workspace |
+	workspace := SoilQueueWorkspace
+		index: ((SoilIndexedDictionary newWithBackend: SoilSkipList)
+			keySize: 24;
+			maxLevel: 16;
+			yourself)
+		keySize: 24
+		lanes: {
+			SoilQueueLaneDescription
+				named: #default
+				range: (SoilPrefixRange prefix: 0 width: 1 keySize: 24)
+				format: self format.
+			SoilQueueLaneDescription
+				named: #c
+				range: (SoilPrefixRange prefix: 2 width: 1 keySize: 24)
+				format: self format }.
+	workspace addLaneNamed: #b format: self format.
+	self assert: (workspace laneNamed: #b) range prefix equals: 1
 ]
 
 { #category : #tests }

@@ -119,13 +119,15 @@ SoilQueue >> add: anEntry to: aLaneName in: aTransaction [
 { #category : #lanes }
 SoilQueue >> addLane: aSymbol format: aFormat [
 	"a lane more, stored in my workspace under the next free marker. It takes entries at
-	once and is handed out from from my next start on, like any setting: that start builds
-	it with my other lanes and configures it from my description. So the place to add a
-	lane is before a start -- a migration when the database opens, a registration before
-	the queue runs. A queue that runs takes it too, and hands it out after its next start.
+	once, and I hand it out from when my lanes are built next, like any setting. With a
+	resident that is my next start, which builds the lanes from my workspace and configures
+	them from my description. Without one, my lanes are built where I am created on my
+	workspace, and a start keeps them: the lane comes with a queue created anew there. So
+	the place to add a lane is before a start -- a migration when the database opens, a
+	registration before the queue runs.
 
-	Nothing takes a lane out again: one that is not used any more costs a marker and
-	nothing else"
+	Nothing takes a lane out again: one that is not used any more costs its marker and a
+	look at it in every step"
 
 	self withTransactionDo: [ :txn |
 		(self workspaceIn: txn) addLaneNamed: aSymbol format: aFormat.
@@ -367,7 +369,7 @@ SoilQueue >> lane: aSymbol [
 
 	^ self liveLanes
 		detect: [ :each | each name = aSymbol ]
-		ifNone: [ self error: 'no lane named ', aSymbol printString ]
+		ifNone: [ self error: 'no live lane named ', aSymbol printString ]
 ]
 
 { #category : #accessing }

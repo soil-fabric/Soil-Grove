@@ -111,8 +111,9 @@ SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 	"a lane behind the lowest marker no lane has, and answer it. The caller never picks a
 	marker, so two lanes cannot collide on one, and a lane keeps its marker -- it is written
-	into every key of it. No lane is taken out again, so no marker is freed, and the lowest
-	free one is the one after the last.
+	into every key of it. No lane is taken out again, so no marker is freed. A gap below the
+	last one -- lanes laid out by hand (#index:keySize:lanes:), or taken out while that was
+	still possible -- is filled first, and nothing lies under it.
 
 	Stored with me, in the transaction I was read in; I do not commit"
 
