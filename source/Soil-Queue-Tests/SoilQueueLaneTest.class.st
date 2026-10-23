@@ -22,7 +22,7 @@ Class {
 { #category : #helpers }
 SoilQueueLaneTest >> descriptionIn: aTransaction [
 
-	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
+	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
 ]
 
 { #category : #helpers }
@@ -120,7 +120,6 @@ SoilQueueLaneTest >> testAChangedValueHoldsFromTheNextStart [
 
 	| queue txn |
 	soil addResidentDescription: (SoilQueueDescription
-		named: #work
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24).
 	queue := self residentQueue.
@@ -138,9 +137,9 @@ SoilQueueLaneTest >> testADisabledQueueTakesALaneAndHasItOnceItIsEnabled [
 	queue, and the start that switches the queue on builds it with the others"
 
 	| queue txn |
-	soil addResidentDescription: (SoilQueueDescription
-		named: #work
-		workspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1)).
+	soil addResidentDescription: (SoilQueueDescription new
+		workspace: (SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1);
+		yourself).
 	self inTransaction: [ :t | (self descriptionIn: t) disable ].
 	txn := soil newTransaction.
 	[ queue := ((self descriptionIn: txn) newInstanceIn: txn)
@@ -192,7 +191,6 @@ SoilQueueLaneTest >> testAQueueThatIsNotStartedSaysSo [
 
 	| queue txn |
 	soil addResidentDescription: (SoilQueueDescription
-		named: #work
 		timeOrderedWithBackend: SoilSkipList
 		keySize: 24).
 	txn := soil newTransaction.

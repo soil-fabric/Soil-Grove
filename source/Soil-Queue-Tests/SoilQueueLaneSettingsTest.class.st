@@ -5,7 +5,8 @@ comes from the values set for all lanes, and those from the defaults.
 The same for the worker limit. A lane has the one set for it, or the one set for all
 lanes, and one place if neither is set; lanes share no places.
 
-On a workspace with markers and a second lane, #b, registered as the resident #work.
+On a workspace with markers and two lanes besides #default, #b and #c, registered as the
+resident #queue.
 "
 Class {
 	#name : #SoilQueueLaneSettingsTest,
@@ -26,7 +27,7 @@ SoilQueueLaneSettingsTest >> configure: aBlock [
 { #category : #helpers }
 SoilQueueLaneSettingsTest >> descriptionIn: aTransaction [
 
-	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #work
+	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
 ]
 
 { #category : #helpers }
@@ -76,7 +77,9 @@ SoilQueueLaneSettingsTest >> setUp [
 	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1.
 	workspace addLaneNamed: #b format: SoilQueueTimeOrderedKeyFormat new.
 	workspace addLaneNamed: #c format: SoilQueueTimeOrderedKeyFormat new.
-	soil addResidentDescription: (SoilQueueDescription named: #work workspace: workspace)
+	soil addResidentDescription: (SoilQueueDescription new
+		workspace: workspace;
+		yourself)
 ]
 
 { #category : #running }
