@@ -68,8 +68,7 @@ SoilQueueGroupedDispatchTest >> put: anInteger into: aGroup dueAt: aDateAndTime 
 		workspace := self workspaceIn: txn.
 		(1 to: anInteger) collect: [ :each |
 			workspace
-				add: ((SoilQueueTestEntry on: 'work')
-					groupId: aGroup;
+				add: ((SoilQueueTestGroupedEntry on: 'work' group: aGroup)
 					readyAt: aDateAndTime;
 					yourself)
 				to: (workspace laneNamed: #groups) ] ]

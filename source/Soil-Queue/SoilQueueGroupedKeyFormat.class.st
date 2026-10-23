@@ -27,23 +27,15 @@ So a lane of mine is read by its groups. Of each group only the first entry can 
 first one that is not due says nothing about the next group; I answer which entry is due
 next and how many are from the group heads, one jump per group.
 
-The width of a group id is mine, eight bytes unless said otherwise. The sequence takes
-four, the id eight.
+The group comes from the entry (SoilQueueEntry>>#groupId), read once, when it comes in;
+from then on the key holds it. A group id is a non-negative integer in eight bytes, the
+sequence takes four, the id eight: twenty bytes behind the marker.
 "
 Class {
 	#name : #SoilQueueGroupedKeyFormat,
 	#superclass : #SoilQueueKeyFormat,
-	#instVars : [
-		'groupIdSize'
-	],
 	#category : #'Soil-Queue'
 }
-
-{ #category : #'instance creation' }
-SoilQueueGroupedKeyFormat class >> groupIdSize: anInteger [
-
-	^ self new setGroupIdSize: anInteger
-]
 
 { #category : #converting }
 SoilQueueGroupedKeyFormat >> appendKeyPartsFor: anEntry in: aLaneDescription of: aQueueWorkspace on: aWriteStream [
@@ -108,31 +100,26 @@ SoilQueueGroupedKeyFormat >> firstKeyOfGroupOf: aKey in: aRange [
 
 { #category : #converting }
 SoilQueueGroupedKeyFormat >> groupBytesOf: anEntry [
-	"the group id of anEntry in my width. A negative number is refused rather than written,
-	because #asByteArrayOfSize: drops the sign without a word, and -5 would share a group
-	with 5"
+	"the group id of anEntry in eight bytes. A negative number is refused rather than
+	written, because #asByteArrayOfSize: drops the sign without a word, and -5 would share a
+	group with 5. One too large for eight bytes #asByteArrayOfSize: refuses itself"
 
 	| group |
 	group := anEntry groupId.
 	group ifNil: [ ^ self error: anEntry printString , ' has no group id for a grouped lane' ].
-	group isInteger ifTrue: [
-		group < 0 ifTrue: [ ^ self error: 'a group id cannot be negative: ' , group printString ].
-		^ group asByteArrayOfSize: groupIdSize ].
-	(group isKindOf: ByteArray) ifFalse: [
-		^ self error: 'a group id is an integer or a byte array, not ' , group printString ].
-	group size = groupIdSize ifFalse: [
-		^ self error: 'a group id of ' , group size printString , ' bytes where '
-			, groupIdSize printString , ' are expected' ].
-	^ group
+	group isInteger ifFalse: [
+		^ self error: 'a group id is a non-negative integer, not ' , group printString ].
+	group < 0 ifTrue: [ ^ self error: 'a group id cannot be negative: ' , group printString ].
+	^ group asByteArrayOfSize: 8
 ]
 
 { #category : #accessing }
 SoilQueueGroupedKeyFormat >> groupIn: aKey of: aRange [
-	"the group a key of a section belongs to: the bytes behind the section's marker"
+	"the group a key of a section belongs to: the eight bytes behind the section's marker"
 
 	| start |
 	start := aRange width + 1.
-	^ aKey copyFrom: start to: start + groupIdSize - 1
+	^ aKey copyFrom: start to: start + 7
 ]
 
 { #category : #reading }
@@ -150,12 +137,6 @@ SoilQueueGroupedKeyFormat >> groupHeadsIn: aLaneDescription of: aQueueWorkspace 
 			(self lastIndexKeyOfGroupOf: key in: aLaneDescription of: aQueueWorkspace) + 1 ]
 ]
 
-{ #category : #accessing }
-SoilQueueGroupedKeyFormat >> groupIdSize [
-
-	^ groupIdSize
-]
-
 { #category : #reading }
 SoilQueueGroupedKeyFormat >> headOfGroupOf: anIndexKey in: aLaneDescription of: aQueueWorkspace [
 	"the first entry of the group a key belongs to, as key -> entry, or nil when the group
@@ -171,13 +152,6 @@ SoilQueueGroupedKeyFormat >> headOfGroupOf: anIndexKey in: aLaneDescription of: 
 		to: (self lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescription of: aQueueWorkspace)
 		do: [ :key :entryBlock | ^ key -> entryBlock value ].
 	^ nil
-]
-
-{ #category : #initialization }
-SoilQueueGroupedKeyFormat >> initialize [
-
-	super initialize.
-	groupIdSize := 8
 ]
 
 { #category : #converting }
@@ -263,24 +237,18 @@ SoilQueueGroupedKeyFormat >> nextDueIn: aLaneDescription of: aQueueWorkspace at:
 
 { #category : #accessing }
 SoilQueueGroupedKeyFormat >> partsSize [
-	"the group id, four bytes of sequence, eight of id"
+	"eight bytes of group id, four of sequence, eight of id"
 
-	^ groupIdSize + 12
+	^ 20
 ]
 
 { #category : #converting }
 SoilQueueGroupedKeyFormat >> sequenceIn: aKey behind: aMarkerWidth [
 	"where the entry under aKey stands in its group -- the four bytes behind the marker and
-	the group id"
+	the eight of the group id"
 
 	| start |
-	start := aMarkerWidth + groupIdSize + 1.
+	start := aMarkerWidth + 9.
 	^ (aKey copyFrom: start to: start + 3) asInteger
 ]
 
-{ #category : #initialization }
-SoilQueueGroupedKeyFormat >> setGroupIdSize: anInteger [
-
-	anInteger < 1 ifTrue: [ ^ self error: 'a group id needs at least one byte' ].
-	groupIdSize := anInteger
-]

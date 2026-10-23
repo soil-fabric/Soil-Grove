@@ -63,8 +63,10 @@ SoilQueueDeadLetterTest >> put: anEntry [
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ | key |
-	  key := (self workspaceIn: txn) add: anEntry.
+	^ [ | workspace key |
+	  workspace := self workspaceIn: txn.
+	  anEntry readyAt ifNil: [ anEntry readyAt: DateAndTime now ].
+	  key := workspace add: anEntry to: workspace defaultLane.
 	  txn commit.
 	  key ]
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]

@@ -80,28 +80,23 @@ SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySiz
 ]
 
 { #category : #adding }
-SoilQueueWorkspace >> add: anEntry [
-	"put an entry into my first lane"
-
-	^ self add: anEntry to: self defaultLane
-]
-
-{ #category : #adding }
 SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 	"put an entry into a lane, in the transaction I was read in -- I do not commit. The
 	notification that wakes a worker belongs after that commit, not here: before it there
 	is nothing to find.
 
-	An entry that says nothing about when it may run is ready now: the time that sorts an
-	entry is the time it was put in. A queue puts in its own clock's time first, see
-	SoilQueue>>#add:in:, so this is only for whoever writes to me directly.
+	The entry says when it may run from, and one that does not is refused. That time sorts
+	it, and when nobody else has set it, it is the queue's to set, by the queue's clock
+	(SoilQueue>>#add:to:in:). Set here it would be the wall clock past a queue that has a
+	clock of its own -- for a queue driven by a test clock, an entry that is never due.
 
 	Answers the key in the form the index compares in, which is the form everything else
 	hands around too. #keyFor:in: of the lane answers the other form, the bytes it is
 	composed of."
 
 	| key |
-	anEntry readyAt ifNil: [ anEntry readyAt: DateAndTime now ].
+	anEntry readyAt ifNil: [
+		^ self error: anEntry printString , ' says nothing about when it may run' ].
 	key := aLaneDescription keyFor: anEntry in: self.
 	index at: key put: anEntry.
 	^ key asIndexKeyOfSize: keySize

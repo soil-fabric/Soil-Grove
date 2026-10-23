@@ -15,7 +15,8 @@ Class {
 	#name : #SoilQueueTestContinuingEntry,
 	#superclass : #SoilQueueEntry,
 	#instVars : [
-		'stepsOwed'
+		'stepsOwed',
+		'progress'
 	],
 	#category : #'Soil-Queue-Tests'
 }
@@ -47,6 +48,21 @@ SoilQueueTestContinuingEntry >> performIn: aTransaction [
 	^ step < stepsOwed
 		ifTrue: [ #more ]
 		ifFalse: [ #finished ]
+]
+
+{ #category : #accessing }
+SoilQueueTestContinuingEntry >> progress [
+	"how many steps I have done, 0 before the first. A field of mine, because my target
+	has no state machine that would know"
+
+	^ progress
+]
+
+{ #category : #accessing }
+SoilQueueTestContinuingEntry >> progress: anInteger [
+	"set after the effect it stands for -- see the class comment of SoilQueueEntry"
+
+	progress := anInteger
 ]
 
 { #category : #working }

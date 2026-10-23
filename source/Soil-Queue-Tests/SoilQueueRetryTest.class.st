@@ -101,7 +101,11 @@ SoilQueueRetryTest >> put: aBlock [
 	"aBlock builds the entry on the target read in the same transaction"
 
 	^ self inTransaction: [ :txn |
-		(self workspaceIn: txn) add: (self due: (aBlock value: (txn root at: #target))) ]
+		| workspace |
+		workspace := self workspaceIn: txn.
+		workspace
+			add: (self due: (aBlock value: (txn root at: #target)))
+			to: workspace defaultLane ]
 ]
 
 { #category : #helpers }

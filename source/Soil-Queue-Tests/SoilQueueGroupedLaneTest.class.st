@@ -17,8 +17,8 @@ Class {
 { #category : #helpers }
 SoilQueueGroupedLaneTest >> entryIn: aGroup [
 
-	^ (SoilQueueTestEntry on: 'work')
-		groupId: aGroup;
+	^ (SoilQueueTestGroupedEntry on: 'work' group: aGroup)
+		readyAt: DateAndTime now;
 		yourself
 ]
 
@@ -158,9 +158,21 @@ SoilQueueGroupedLaneTest >> testAnEntryOfAGroupStaysPutWhenItsDueTimeChanges [
 ]
 
 { #category : #tests }
+SoilQueueGroupedLaneTest >> testANegativeGroupIsRefused [
+	"eight bytes would drop the sign without a word, and -5 would share a group with 5"
+
+	self should: [ self put: (self entryIn: -5) ] raise: Error.
+	self assert: self keysOfGroupsLane isEmpty
+]
+
+{ #category : #tests }
 SoilQueueGroupedLaneTest >> testAnEntryWithoutAGroupIsRefused [
 
-	self should: [ self put: (SoilQueueTestEntry on: 'work') ] raise: Error.
+	self
+		should: [ self put: ((SoilQueueTestEntry on: 'work')
+			readyAt: DateAndTime now;
+			yourself) ]
+		raise: Error.
 	self assert: self keysOfGroupsLane isEmpty
 ]
 
