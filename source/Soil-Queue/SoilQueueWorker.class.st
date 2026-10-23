@@ -6,10 +6,11 @@ I do not scan. Which entry is mine is the queue's decision and nobody else's -- 
 otherwise have to know about the ordering, the section and what the others hold, and two
 of us would take the same entry.
 
-I have no stop protocol either, and that is deliberate. Stopping goes to the queue: it
-stops handing out, and I end because nothing comes any more. A process suspended in the
-middle of a transaction leaves half-written state and held locks behind, and the way to
-never do that is to have no way to do it.
+I have no stop protocol of my own either, and that is deliberate. Stopping goes to the
+queue: it stops handing out, and I end because nothing comes any more. A process stopped
+in the middle of a transaction leaves half-written state and held locks behind, so
+nothing asks me to stop in between. The hard way out, #terminate, is the queue's alone,
+and only after its cooperative stop ran out of time.
 
 Nothing about me is written down. The state that has to survive a crash sits on the entry
 -- it says claimed, and after a restart no worker holds it, which is exactly how an
@@ -17,8 +18,11 @@ orphaned claim is recognised. The other half of that is the queue's: the keys th
 out (#isHolding:), from the moment one is handed to me until I give it back, so it can
 tell a claim with a worker from a claim without one.
 
-A work unit that throws does not take me down. It is counted on the queue and I go on to
-the next entry, because a transient failure must not cost a worker.
+An error that gets out of a step -- the commit, a conflict that did not resolve, an error
+of Soil's, the bookkeeping -- does not take me down: the queue counts it and gives the
+entry back (SoilQueue>>#stepFailed:on:), and I go on to the next entry, because a
+transient failure must not cost a worker. A work unit that fails at its work is no
+failure of mine: the queue books it as its result.
 "
 Class {
 	#name : #SoilQueueWorker,

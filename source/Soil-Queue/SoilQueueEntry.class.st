@@ -34,7 +34,8 @@ backoff holds up my group where I am (SoilQueueGroupedKeyFormat).
 An abort leaves one question open, and the queue cannot answer it for me: *what holds
 afterwards*. An image can crash at any moment and a rolling release interrupts work as a
 matter of routine, so every subclass answers it, in #resumeAfterAbortIn:. The queue calls
-it each time it finds me claimed with no worker, before it gives me back or parks me.
+it each time it gives me back or parks me after a loss -- a claim it finds at a start with
+nobody holding it, or a step of mine that failed around my work unit -- and before either.
 There are three answers, and a subclass gives one of them and says which --
 
 	continuing    resume at the progress point; the progress has to be persisted, and
@@ -98,14 +99,16 @@ Class {
 
 { #category : #accessing }
 SoilQueueEntry class >> newId [
-	"eight bytes that make my key unique among the entries that share my due time.
+	"eight bytes that make my key unique where the rest of it is not: among the entries of my
+	due time on a lane ordered by due time, among those of my group that drew my sequence
+	number on a grouped lane.
 
 	Drawn at random rather than counted up. A counter would have to live somewhere that
 	every enqueue writes to, and under MVCC a structure every writer touches is exactly
 	where write conflicts come from -- the one thing the design goes out of its way to
-	avoid. What it costs is order among entries of the very same millisecond, which the
-	queue never promised: it hands out the oldest *due* entry, and due times are what it
-	orders by."
+	avoid. What it costs on a lane ordered by due time is order among entries of the very
+	same millisecond, which the queue never promised: it hands out the oldest *due* entry
+	there, and due times are what it orders by."
 
 	^ (UUID new asInteger \\ (256 raisedTo: 8)) asByteArrayOfSize: 8
 ]
@@ -149,16 +152,17 @@ SoilQueueEntry >> readyAt [
 	about a point in time was made.
 
 	Nil until I am put into a queue unless my creator set one: the queue says 'now' then,
-	because what sorts me is the time I was put in, not the time I was made"
+	because what counts is the time I was put in, not the time I was made"
 
 	^ readyAt
 ]
 
 { #category : #accessing }
 SoilQueueEntry >> readyAt: aDateAndTime [
-	"whoever changes this on an entry that already lies in a queue has to move its key with
-	it, because the key is what sorts by this. A work unit of mine may change it and answer
-	#more: the queue then moves the key itself, in the same commit"
+	"whoever changes this on an entry that already lies in a queue has to have the workspace
+	move its key (SoilQueueWorkspace>>#moveKey:for:): on a lane ordered by due time the key
+	sorts by this, on a grouped lane it stays where it is. A work unit of mine may change it
+	and answer #more: the queue then moves the key itself, in the same commit"
 
 	readyAt := aDateAndTime
 ]
@@ -188,7 +192,8 @@ SoilQueueEntry >> groupId [
 
 { #category : #accessing }
 SoilQueueEntry >> id [
-	"eight bytes that tell me apart from the other entries that are due at the same time"
+	"eight bytes that tell my key apart from another that is the same in everything else --
+	see #newId"
 
 	^ id
 ]
@@ -215,8 +220,9 @@ SoilQueueEntry >> isPending [
 
 { #category : #accessing }
 SoilQueueEntry >> noteOrphaned [
-	"my worker went away while I was claimed, and I am about to be given back. Counted here,
-	at the one moment the queue finds that out, and not at the claim"
+	"my worker went away while I was claimed, or my step failed around my work unit, and I
+	am about to be given back. Counted here, at the one moment the queue learns of it, and
+	not at the claim"
 
 	orphanedRetries := orphanedRetries + 1
 ]
@@ -246,9 +252,12 @@ SoilQueueEntry >> orphanedRetries [
 { #category : #working }
 SoilQueueEntry >> performIn: aTransaction [
 	"do one work unit in the transaction the queue opened, and answer what comes next:
-	#more, #finished or #failed. No commit of my own -- the result, the index removal and
-	any follow-up entry belong in the queue's single commit, so that the state where the
-	work wants to go on and no entry is left cannot arise.
+	#more or #finished. A unit that failed at its work for a reason of its own answers
+	#finished as well -- a failure at the work is a result, and the target carries it. One
+	that throws is given up on, or given back when the error is Soil's (SoilQueue>>#workOnce:).
+	No commit of my own -- the result, the index removal and any follow-up entry belong in
+	the queue's single commit, so that the state where the work wants to go on and no entry
+	is left cannot arise.
 
 	Work and the question 'does it go on?' are one call rather than two because the answer
 	is a property of the step that just ran. Keeping it between two calls would need a

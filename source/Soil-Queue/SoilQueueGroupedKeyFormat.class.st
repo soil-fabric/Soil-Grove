@@ -175,7 +175,8 @@ SoilQueueGroupedKeyFormat >> lastIndexKeyOfGroupOf: anIndexKey in: aLaneDescript
 
 { #category : #accessing }
 SoilQueueGroupedKeyFormat >> lastKeyOfGroup: aGroup in: aRange [
-	"the highest key a group can have in a section: every byte behind the group set"
+	"the highest key a group can have in a section: sequence and id set to all ones, and
+	behind them the padding every key has"
 
 	^ aRange keyWith: aGroup , (ByteArray new: 12 withAll: 255)
 ]

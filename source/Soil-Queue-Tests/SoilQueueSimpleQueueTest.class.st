@@ -5,7 +5,12 @@ the order they came, and an entry that has to be tried again goes to the back of
 
 That is not a third kind of queue. It is the time ordered lane when nobody sets a delay,
 and these tests are the proof: the design has to carry it without a special case.
-Driven on a clock that stands still until it is moved.
+
+Driven on a clock that stands still until it is moved, and moved a second on after every
+entry that is put in. The order of putting in is kept to the millisecond and no finer:
+entries put in within one millisecond count as simultaneous, and their random ids order
+them by chance (SoilQueueTimeOrderedKeyFormat). Without the move every entry of a test
+would share one time.
 "
 Class {
 	#name : #SoilQueueSimpleQueueTest,

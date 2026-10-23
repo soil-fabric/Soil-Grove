@@ -82,8 +82,8 @@ SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySiz
 { #category : #adding }
 SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 	"put an entry into a lane, in the transaction I was read in -- I do not commit. The
-	notification that wakes a worker belongs after that commit, not here: before it there
-	is nothing to find.
+	notification that has it found (SoilActiveResident>>#noteWork, which wakes the
+	dispatcher) belongs after that commit, not here: before it there is nothing to find.
 
 	The entry says when it may run from, and one that does not is refused. That time decides
 	when it is due -- on a lane ordered by due time it sorts it, too -- and when nobody else
@@ -218,8 +218,8 @@ SoilQueueWorkspace >> keysAndEntriesDo: aBlock [
 
 	The only reader of this is the recovery pass, and it reads every entry because that is
 	where the answer is: an orphaned claim cannot be found over the index, since a claim
-	does not change the key. Selecting work does not come this way -- it reads one entry
-	and stops."
+	does not change the key. Selecting work does not come this way: it walks a lane the way
+	its format says and stops at the first entry that goes."
 
 	lanes do: [ :each | self keysAndEntriesIn: each do: aBlock ]
 ]
@@ -308,7 +308,12 @@ SoilQueueWorkspace >> moveKey: aKey for: anEntry [
 	on it -- the index is the one that writes the journal and marks itself for the commit.
 
 	Which key that is, is the lane's format's to say. One whose keys carry no due time
-	answers the key the entry has: it waits where it is, and its due time is read from it."
+	answers the key the entry has: it waits where it is, and its due time is read from it.
+
+	Two things are the caller's, in the same commit: #readyAt is set before, since the new
+	key is read off it, and a claimed entry is given back (SoilQueueEntry>>#releaseClaim) --
+	moving it does not. Both callers, SoilQueue>>#workOnce: on #more and SoilQueue>>#recover:,
+	do both."
 
 	| lane newKey |
 	lane := self laneFor: aKey.
@@ -336,7 +341,8 @@ SoilQueueWorkspace >> nextDueAt: aDateAndTime in: aLaneDescription skipping: aCo
 SoilQueueWorkspace >> nextDueAt: aDateAndTime in: aLaneDescription skipping: aCollection preferring: aPreferredKey after: aLastKey ifNone: aBlock [
 	"the key of the next entry of a lane that is due, skipping the keys that are already
 	out. When nothing is due, aBlock is evaluated with the time the next entry becomes due,
-	or with nil when there is nothing at all.
+	or with nil when no entry may go later either: a claimed entry offers no time, and on a
+	grouped lane neither does anything behind a head that is out or claimed.
 
 	Which entry that is, is the lane's format's to say: the oldest due one on a lane ordered
 	by due time, the first of a group on a grouped lane -- preferring the group of
@@ -356,7 +362,8 @@ SoilQueueWorkspace >> nextDueAt: aDateAndTime in: aLaneDescription skipping: aCo
 { #category : #accessing }
 SoilQueueWorkspace >> nextDueTimeAt: aDateAndTime [
 	"when the first entry of any lane may run: aDateAndTime itself when one is already due,
-	the time of the earliest one when none is, and nil when no lane holds anything.
+	the time of the earliest one when none is, and nil when no lane has an entry that may
+	run -- a claimed one offers no time (#nextDueAt:in:skipping:preferring:after:ifNone:).
 
 	One of the two questions an embedder asks a queue. It answers a time rather than a key
 	because the asker is not going to work on it -- it wants to know how long it may sleep,
@@ -374,7 +381,7 @@ SoilQueueWorkspace >> nextDueTimeAt: aDateAndTime [
 { #category : #accessing }
 SoilQueueWorkspace >> nextDueTimeAt: aDateAndTime in: aLaneDescription [
 	"when the first entry of a lane may run: aDateAndTime itself when one is already due,
-	the time of the earliest one when none is, and nil when the lane holds nothing"
+	the time of the earliest one when none is, and nil when no entry of the lane may run"
 
 	self
 		nextDueAt: aDateAndTime

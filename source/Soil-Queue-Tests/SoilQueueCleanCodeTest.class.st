@@ -1,12 +1,11 @@
 "
 The structural checks Soil applies to its own packages, pointed at Soil-Queue. Without
 this the new package sits outside every one of them: #packageToCheck resolves upwards to
-Soil-Core, so the rules would run twice over Soil and never over us.
+Soil-Resident, so the rules would run twice over Soil-Resident and never over us.
 
-I inherit from Soil-Resident's version rather than from SoilCleanCodeTest, because the
-three things Soil-Resident had to add are the same three things here -- two rules that
-are inherited as `self skip` for known violations the new packages do not have, and the
-check for references that a fully loaded development image resolves and a build does not.
+I inherit from Soil-Resident's version rather than from SoilCleanCodeTest, because what
+it adds is wanted here as well: the check that every class has a comment, and the check
+for references that a fully loaded development image resolves and a build does not.
 Copying them a second time is how they would drift apart.
 "
 Class {

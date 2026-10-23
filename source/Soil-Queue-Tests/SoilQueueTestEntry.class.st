@@ -1,7 +1,7 @@
 "
 A concrete entry that fills in the seam with the least a subclass can get away with: it
 counts its runs and reports #finished. That is enough to show what the base does and
-does not do, and it is the entry the other test subclasses build on.
+does not do, and several test entries build on it.
 
 I am a repeating entry, the kind whose promise is idempotence -- counting a run is
 idempotent in the only sense that matters here, because nothing outside me sees it.

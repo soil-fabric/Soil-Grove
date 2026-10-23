@@ -50,8 +50,8 @@ SoilQueueDispatchTest >> inTransaction: aBlock [
 
 { #category : #accessing }
 SoilQueueDispatchTest >> path [
-	"a database of its own. This is the only test class here that forks, and a worker that
-	outlives its test would otherwise meet the next one's database"
+	"a database of its own: workers fork here, and one that outlives its test would
+	otherwise meet the next one's database"
 
 	^ 'soil-queue-dispatch-tests'
 ]

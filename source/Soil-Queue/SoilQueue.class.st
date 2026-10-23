@@ -1,17 +1,19 @@
 "
-Work that outlives the process which created it, handed out oldest-due first.
+Work that outlives the process which created it, handed out lane by lane: oldest due
+first on a lane ordered by due time, the groups in turn on a grouped one.
 
 I am the live half, and I have to be: what I do is keep two workers off the same entry,
 and that only works if every one of them talks to the same object. A database object
 cannot be that -- two transactions materialize two of it, each with a mutex of its own
-that excludes nobody. So the durable part is my description's and the coordinating part
-is mine.
+that excludes nobody. So the durable part is my workspace's -- my description only holds
+it, and my configuration -- and the coordinating part is mine.
 
 Being live as long as the database is open, carrying runtime state, and having a
 persisted description is precisely what a resident is, so I am one. Nothing about that
-forces a supervisor on anyone: created on my workspace (#onWorkspace:in:) and never
-started, I still hand out entries, and without a supervisor there are no competing workers
-for the mutex to arbitrate.
+forces a registration on anyone: created on my workspace (#onWorkspace:in:) I get a
+supervisor of my own that supervises nothing and only opens my transactions, and I hand
+out entries whether I am started or not. Not started, I have no dispatcher and no workers,
+and whoever drives me is the only one at the mutex.
 
 Mine is what competing workers meet at, and all of it lives in memory only: the mutex,
 the set of keys that are out, the workers that are running, the wake time and my live
@@ -104,8 +106,9 @@ SoilQueue >> add: anEntry in: aTransaction [
 	it is the time it was put in. One that sets a time keeps it.
 
 	Into my first lane. Whoever has more than one says which, see #add:to:in:. The
-	notification that wakes a worker is the caller's, after the commit: before it there is
-	nothing to find."
+	notification that has it found -- #noteWork, which wakes my dispatcher, whose step
+	starts workers -- is the caller's, after the commit: before it there is nothing to
+	find."
 
 	^ self
 		add: anEntry
@@ -290,10 +293,10 @@ SoilQueue >> configureFrom: aDescription in: aTransaction [
 
 { #category : #working }
 SoilQueue >> conflictLimit [
-	"how often the same work unit is tried again after a write conflict before the conflict
-	is treated as an error like any other. Small on purpose: a conflict that survives a few
-	fresh reads is not a conflict any more, it is something that does not resolve, and
-	trying for ever would hide it."
+	"how many attempts the same work unit gets while it keeps meeting a write conflict, the
+	first one included, before the conflict is treated as an error like any other. Small on
+	purpose: a conflict that survives a few fresh reads is not a conflict any more, it is
+	something that does not resolve, and trying for ever would hide it."
 
 	^ 3
 ]
@@ -393,8 +396,10 @@ SoilQueue >> name [
 
 { #category : #accessing }
 SoilQueue >> nextDueTime [
-	"when something of mine may run next, or nil when I hold nothing. For an embedder's
-	external wakeup, and for its decision whether the database is quiet enough to close."
+	"when something of mine may run next, or nil when no lane has an entry that may: one
+	that says claimed -- with a worker, or waiting for the recovery at the next start --
+	offers no time. For an embedder's external wakeup, and for its decision whether the
+	database is quiet enough to close."
 
 	^ self withTransactionDo: [ :txn |
 		(self workspaceIn: txn) nextDueTimeAt: self now ]
@@ -430,8 +435,8 @@ SoilQueue >> prepareIn: aTransaction [
 
 	Also asks again for claims that nobody holds. A restart does not make a new instance,
 	so what was only asked once per instance would never be asked after the first start --
-	and a worker that was taken away in the stop, or whose commit failed, leaves exactly
-	such a claim behind."
+	and a worker that was taken away in the stop leaves exactly such a claim behind, as does
+	a failed step whose giving back failed as well (#stepFailed:on:)."
 
 	recovered := false.
 	self descriptionId ifNotNil: [
@@ -460,7 +465,9 @@ SoilQueue >> recover: aKey [
 	An entry that is given back waits first, by the curve of its lane: what took its worker
 	away -- a commit that does not go through, a segment that is not
 	there yet -- is often gone after a short while, and without the wait the budget would be
-	used up in milliseconds. The key moves with the time, in the same commit.
+	used up in milliseconds. On a lane ordered by due time the key moves with the time, in
+	the same commit; on a grouped lane the entry keeps its key and holds up its group
+	(SoilQueueWorkspace>>#moveKey:for:).
 
 	A parked entry is said, in a line of its own once the commit has gone through: a dead
 	letter is for somebody to look at, and nobody is woken for it. The line is made while
@@ -491,20 +498,24 @@ SoilQueue >> recover: aKey [
 
 { #category : #recovery }
 SoilQueue >> recoverOrphanedClaims [
-	"the push at opening: an entry that says claimed and that nobody is holding was in the
-	middle of something when the image went away.
+	"the push at every start: an entry that says claimed and that nobody is holding lost its
+	worker -- the image went away, a worker was terminated in the stop, or a failed step
+	could not be given back either.
 
 	Found over the entries and not over the index, because a claim does not change a key --
-	the ordering cannot tell the two apart. What happens then is the entry's business and
-	not mine: a continuing one keeps its progress, a repeating one starts over on its
-	promise of idempotence, a compensating one is cleaned up first, and each says which in
-	#resumeAfterAbortIn:. That is the whole reason the answer sits on the entry rather than
-	in the queue.
+	the ordering cannot tell the two apart. What holds after the abort is the entry's
+	business and not mine: a continuing one keeps its progress, a repeating one starts over
+	on its promise of idempotence, a compensating one is cleaned up first, and each says
+	which in #resumeAfterAbortIn:. That is the whole reason the answer sits on the entry
+	rather than in the queue. Whether it comes back, and after how long, is its lane's
+	(#recover:).
 
 	Once per start, not once per instance: #prepareIn: asks again, because a restart runs
 	on the same instance. Within a start everything claimed after this is claimed by a
-	worker of mine, and #isHolding: says so -- which is also why asking again at a start is
-	safe: a worker of the run before that is still on its entry holds it.
+	worker of mine, and #isHolding: says so for as long as the worker is on it -- which is
+	also why asking again at a start is safe: a worker of the run before that is still on
+	its entry holds it. The one claim a start leaves behind itself, a failed step whose
+	giving back failed as well, waits for the next start (#stepFailed:on:).
 
 	One orphan that cannot be given back does not keep the others waiting. It is reported
 	like any failed step and stays claimed, and the next start tries it again."
@@ -622,10 +633,11 @@ SoilQueue >> stepFailed: anError on: aKey [
 	"an error got out of the step of the entry at aKey, and nobody booked it: the work unit
 	did not fail at its work (that one is booked, see #book:for:), something around it did --
 	the commit, a conflict that did not resolve, a record that could not be read, the
-	bookkeeping itself. The entry still says claimed and
-	no worker holds it any more, which is exactly what a lost worker leaves behind, so it goes
+	bookkeeping itself. The entry still says claimed, as a lost worker leaves it, and goes
 	back the same way: #recover: asks it what holds after the abort, counts it, waits, and
-	parks it when the lane allows no more.
+	parks it when the lane allows no more. Its key is still out with my worker, which
+	releases it after this, so no recovery pass takes the entry meanwhile. If the claim
+	itself failed, the entry is still pending, and #recover: leaves it as it is.
 
 	Counted as a failed step first. If giving the entry back fails as well, that is counted
 	too and the entry stays claimed: the next start finds it, see #recoverOrphanedClaims"
@@ -742,11 +754,12 @@ SoilQueue >> workOnce: aKey [
 
 	#more gives the claim back, and the entry stays in the ordering under the key its due
 	time now asks for. Anything else is the end of the entry: it leaves the ordering, and
-	nothing is written on it on the way out. A work unit that says 'again, but later' has moved its #readyAt,
-	and the key is what sorts by it -- left where it was, the entry would be handed out
-	again at once. The move goes with the result into the same commit, and it never reads
-	the target: only the reference travels. An entry that did not move its due time keeps
-	its key and is due again immediately.
+	nothing is written on it on the way out. A work unit that says 'again, but later' has
+	moved its #readyAt. On a lane ordered by due time the key is what sorts by it -- left
+	where it was, the entry would be handed out again at once; a grouped lane keeps the key
+	and reads the time off the entry. The move goes with the result into the same commit,
+	and it never reads the target: only the reference travels. An entry that did not move
+	its due time keeps its key and is due again immediately.
 
 	Two ways for the work unit to fail, told apart by the class of the error. One that is
 	neither a SoilError nor a SoilSerializerError -- Soil's own two kinds, the serializer's

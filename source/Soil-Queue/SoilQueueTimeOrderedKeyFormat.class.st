@@ -1,5 +1,5 @@
 "
-The format that orders a queue by time: due time first, then the entry's id.
+The format that orders a lane by time: due time first, then the entry's id.
 
 The due time comes first because it is what the queue selects by -- the oldest due entry
 is the first key of the section, so finding work is a lookup and not a search. The id
@@ -7,8 +7,11 @@ comes second and only to make the key unique, which the index needs before an en
 be moved to a new due time under backoff.
 
 Time is written as milliseconds since the Unix epoch in eight bytes. Seconds would put
-too many entries on one key and leave their order to the id alone; microseconds buy
-nothing a queue can use, since a rate at the outlet dwarfs the difference.
+too many entries on one key and leave their order to the id alone; microseconds would
+promise an order the queue does not keep. What is put in within one millisecond -- several
+entries in one transaction, say -- counts as simultaneous, and the random id orders it by
+chance (SoilQueueEntry class>>#newId): an order among those would need a counter that
+every putting in writes to, and that is where write conflicts come from.
 "
 Class {
 	#name : #SoilQueueTimeOrderedKeyFormat,
