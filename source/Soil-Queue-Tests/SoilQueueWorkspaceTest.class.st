@@ -155,7 +155,9 @@ SoilQueueWorkspaceTest >> testAnEntryThatSaysNoTimeIsRefused [
 	  workspace := self workspaceIn: txn.
 	  self
 		should: [ workspace add: (SoilQueueTestEntry on: 'work') to: workspace defaultLane ]
-		raise: Error.
+		raise: Error
+		withExceptionDo: [ :error |
+			self assert: (error messageText includesSubstring: 'says nothing about when it may run') ].
 	  count := 0.
 	  workspace keysAndEntriesDo: [ :key :entry | count := count + 1 ].
 	  self assert: count equals: 0 ]

@@ -23,11 +23,13 @@ it any more; a parked one lies in the dead letters, with the claim of the attemp
 parked in. Saying so on me as well would be a second place for the same fact, and a
 write of every finished entry for nothing.
 
-Two of my fields end up in my key rather than only on me. #readyAt is the sort value,
-and it is a lower bound and not an appointment -- I am allowed to run from then on, not
-scheduled for then, because the workers of my lane can all be busy for arbitrarily long.
-#id is what makes the key unique, which the index needs: moving a key is refused on an
-index with duplicate keys, and moving a key is what backoff does.
+On a lane ordered by due time two of my fields end up in my key rather than only on me.
+#readyAt is the sort value, and it is a lower bound and not an appointment -- I am
+allowed to run from then on, not scheduled for then, because the workers of my lane can
+all be busy for arbitrarily long. #id is what makes the key unique, which the index needs:
+moving a key is refused on an index with duplicate keys, and moving a key is what backoff
+does there. A grouped lane keys me by my group instead and leaves #readyAt on me, so a
+backoff holds up my group where I am (SoilQueueGroupedKeyFormat).
 
 An abort leaves one question open, and the queue cannot answer it for me: *what holds
 afterwards*. An image can crash at any moment and a rolling release interrupts work as a

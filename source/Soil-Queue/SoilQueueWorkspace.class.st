@@ -85,8 +85,9 @@ SoilQueueWorkspace >> add: anEntry to: aLaneDescription [
 	notification that wakes a worker belongs after that commit, not here: before it there
 	is nothing to find.
 
-	The entry says when it may run from, and one that does not is refused. That time sorts
-	it, and when nobody else has set it, it is the queue's to set, by the queue's clock
+	The entry says when it may run from, and one that does not is refused. That time decides
+	when it is due -- on a lane ordered by due time it sorts it, too -- and when nobody else
+	has set it, it is the queue's to set, by the queue's clock
 	(SoilQueue>>#add:to:in:). Set here it would be the wall clock past a queue that has a
 	clock of its own -- for a queue driven by a test clock, an entry that is never due.
 
