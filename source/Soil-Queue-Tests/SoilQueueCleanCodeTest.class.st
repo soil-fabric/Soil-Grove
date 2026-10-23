@@ -32,9 +32,10 @@ SoilQueueCleanCodeTest >> packageToCheck [
 { #category : #running }
 SoilQueueCleanCodeTest >> soilTransientDeclarationPackages [
 	"the two transient-declaration checks look here rather than at #packageToCheck. Soil
-	checks its own packages itself; what is unchecked until this says so is ours -- and a
-	queue is exactly the kind of persisted object that needs the declaration, because its
-	mutex, its in-flight set and its live lanes must not be written."
+	checks its own packages itself; what is unchecked until this says so is ours. A queue
+	is never written -- it is a resident, and only its description is stored -- but should
+	it end up in a written graph by accident, its mutex, its in-flight set and its live
+	lanes must not go along, and the declaration is what keeps them out."
 
 	^ { SoilQueueEntry package }
 ]
@@ -51,4 +52,12 @@ SoilQueueCleanCodeTest >> testEveryEntryThatCanWorkSaysWhatHoldsAfterAnAbort [
 	self assertEmpty: (SoilQueueEntry allSubclasses select: [ :each |
 		(each lookupSelector: #performIn:) isAbstract not and: [
 			(each lookupSelector: #resumeAfterAbortIn:) isAbstract ] ])
+]
+
+{ #category : #tests }
+SoilQueueCleanCodeTest >> testTheQueueKeepsTheTransientsItInherits [
+	"a declaration of mine replaces the inherited one rather than adding to it, so a queue
+	that forgot them would write its supervisor and its process along"
+
+	self assert: (SoilQueue soilTransientInstVars includesAll: SoilActiveResident soilTransientInstVars)
 ]

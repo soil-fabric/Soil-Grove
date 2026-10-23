@@ -28,15 +28,6 @@ SoilQueueWorkerLimitTest >> inTransaction: aBlock [
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
 ]
 
-{ #category : #helpers }
-SoilQueueWorkerLimitTest >> laneNamed: aSymbol prefix: anInteger [
-
-	^ SoilQueueLaneDescription
-		named: aSymbol
-		range: (SoilPrefixRange prefix: anInteger width: 1 keySize: 24)
-		format: SoilQueueTimeOrderedKeyFormat new
-]
-
 { #category : #accessing }
 SoilQueueWorkerLimitTest >> path [
 
@@ -95,13 +86,10 @@ SoilQueueWorkerLimitTest >> setUp [
 		initializeRoot.
 	self inTransaction: [ :txn |
 		| workspace |
-		workspace := SoilQueueWorkspace
-			index: ((SoilIndexedDictionary newWithBackend: SoilSkipList)
-				keySize: 24;
-				maxLevel: 16;
-				yourself)
-			keySize: 24
-			lanes: { self laneNamed: #a prefix: 1. self laneNamed: #b prefix: 2 }.
+		workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1.
+		workspace
+			addLaneNamed: #a format: SoilQueueTimeOrderedKeyFormat new;
+			addLaneNamed: #b format: SoilQueueTimeOrderedKeyFormat new.
 		txn root at: #queue put: workspace.
 		txn makeRoot: workspace.
 		workspace initializeIn: txn ]
@@ -149,7 +137,7 @@ SoilQueueWorkerLimitTest >> testAKeyThatIsOutAsksForNoWorker [
 		yourself).
 	running := SoilQueueWorker on: queue lane: (queue lane: #a).
 	queue workerStarting: running.
-	self assert: (queue assignNextIn: (queue lane: #a)) notNil.
+	self assert: (queue assignNextIn: (queue lane: #a) preferring: nil) notNil.
 	queue runStep.
 
 	self assert: (self startedFor: #a in: queue) equals: 2

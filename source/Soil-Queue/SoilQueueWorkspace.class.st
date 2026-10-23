@@ -38,12 +38,17 @@ Class {
 }
 
 { #category : #'instance creation' }
-SoilQueueWorkspace class >> index: aSoilIndexedDictionary keySize: keySizeInBytes lanes: aCollection [
+SoilQueueWorkspace class >> newIndexWithBackend: anIndexClass keySize: keySizeInBytes [
+	"an index the way both of mine are made: for my entries and for the dead letters.
 
-	^ self new
-		setIndex: aSoilIndexedDictionary
-		keySize: keySizeInBytes
-		lanes: aCollection
+	The skip list level is set because Soil leaves it nil, and a nil one fails on the first
+	write with a message that says nothing about what is missing. 16 is what the one
+	long-lived collection in the wild uses. A B-tree ignores it."
+
+	^ (SoilIndexedDictionary newWithBackend: anIndexClass)
+		keySize: keySizeInBytes;
+		maxLevel: 16;
+		yourself
 ]
 
 { #category : #'instance creation' }
@@ -61,17 +66,12 @@ SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySiz
 SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes markerWidth: widthInBytes [
 	"an index of my own with one lane, #default, ordered by due time, behind a marker of
 	widthInBytes -- room for more lanes to be added, one per marker. Whether that room is
-	needed is decided here: the width shapes every key and cannot change later.
+	needed is decided here: the width shapes every key and cannot change later. The dead
+	letters get an index of the same kind and key size"
 
-	The skip list level is set because Soil leaves it nil, and a nil one fails on the first
-	write with a message that says nothing about what is missing. 16 is what the one
-	long-lived collection in the wild uses. A B-tree ignores it."
-
-	^ self
-		index: ((SoilIndexedDictionary newWithBackend: anIndexClass)
-			keySize: keySizeInBytes;
-			maxLevel: 16;
-			yourself)
+	^ self new
+		setIndex: (self newIndexWithBackend: anIndexClass keySize: keySizeInBytes)
+		deadLetters: (self newIndexWithBackend: anIndexClass keySize: keySizeInBytes)
 		keySize: keySizeInBytes
 		lanes: { SoilQueueLaneDescription
 			named: #default
@@ -108,8 +108,8 @@ SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 	"a lane behind the lowest marker no lane has, and answer it. The caller never picks a
 	marker, so two lanes cannot collide on one, and a lane keeps its marker -- it is written
 	into every key of it. No lane is taken out again, so no marker is freed. A gap below the
-	last one -- lanes laid out by hand (#index:keySize:lanes:), or taken out while that was
-	still possible -- is filled first, and nothing lies under it.
+	last one -- in a workspace stored while lanes could still be taken out -- is filled
+	first, and nothing lies under it.
 
 	Stored with me, in the transaction I was read in; I do not commit"
 
@@ -131,15 +131,6 @@ SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 		format: aFormat.
 	lanes add: lane.
 	^ lane
-]
-
-{ #category : #accessing }
-SoilQueueWorkspace >> backend [
-	"the kind of index my entries lie on, in its durable form. Asked of the persistent
-	index and not of the one in hand: a materialized index is wrapped copy-on-write per
-	transaction, and that wrapper cannot be used to build a new index with."
-
-	^ index persistentIndex class
 ]
 
 { #category : #accessing }
@@ -206,31 +197,18 @@ SoilQueueWorkspace >> entryAt: aKey ifAbsent: aBlock [
 	^ index at: aKey ifAbsent: aBlock
 ]
 
-{ #category : #accessing }
-SoilQueueWorkspace >> index [
-
-	^ index
-]
-
 { #category : #initialization }
 SoilQueueWorkspace >> initializeIn: aTransaction [
-	"the objects I hold that are cluster roots of their own, created once, when the
-	description I belong to is initialized -- after it has made me a root.
+	"make the two indexes I was created with cluster roots of their own, once, when the
+	description I belong to is initialized -- after it has made me a root. An index is not
+	copied into my cluster; it is written page by page rather than with me.
 
-	The index is one: it is not copied into my cluster, and it is written page by page
-	rather than with me. An index that is already on disk was put there before and is not
-	mine to create again.
+	The dead letters have the second one. Out of the ordering, so that a parked entry is
+	not stepped over on every scan for work, and still in the store, so that it can be
+	found and looked at -- work that disappears without a trace is worse than work that
+	sits there unfinished."
 
-	The dead letters get a second index. Out of the ordering, so that a parked entry is not
-	stepped over on every scan for work, and still in the store, so that it can be found
-	and looked at -- work that disappears without a trace is worse than work that sits there
-	unfinished."
-
-	index isPresentOnDisk ifFalse: [ aTransaction makeRoot: index ].
-	deadLetters := (SoilIndexedDictionary newWithBackend: self backend)
-		keySize: keySize;
-		maxLevel: 16;
-		yourself.
+	aTransaction makeRoot: index.
 	aTransaction makeRoot: deadLetters
 ]
 
@@ -376,17 +354,6 @@ SoilQueueWorkspace >> nextDueAt: aDateAndTime in: aLaneDescription skipping: aCo
 ]
 
 { #category : #accessing }
-SoilQueueWorkspace >> nextDueAt: aDateAndTime skipping: aCollection ifNone: aBlock [
-	"the same for my first lane"
-
-	^ self
-		nextDueAt: aDateAndTime
-		in: self defaultLane
-		skipping: aCollection
-		ifNone: aBlock
-]
-
-{ #category : #accessing }
 SoilQueueWorkspace >> nextDueTimeAt: aDateAndTime [
 	"when the first entry of any lane may run: aDateAndTime itself when one is already due,
 	the time of the earliest one when none is, and nil when no lane holds anything.
@@ -456,9 +423,10 @@ SoilQueueWorkspace >> scanFrom: aFirstIndexKey to: aLastIndexKey do: aBlock [
 ]
 
 { #category : #initialization }
-SoilQueueWorkspace >> setIndex: aSoilIndexedDictionary keySize: keySizeInBytes lanes: aCollection [
+SoilQueueWorkspace >> setIndex: aSoilIndexedDictionary deadLetters: anotherSoilIndexedDictionary keySize: keySizeInBytes lanes: aCollection [
 
 	index := aSoilIndexedDictionary.
+	deadLetters := anotherSoilIndexedDictionary.
 	keySize := keySizeInBytes.
 	lanes := aCollection asOrderedCollection
 ]
