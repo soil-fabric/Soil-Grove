@@ -5,7 +5,8 @@ comes from the values set for all lanes, and those from the defaults.
 The same for the worker limit. A lane has the one set for it, or the one set for all
 lanes, and one place if neither is set; lanes share no places.
 
-On a workspace with markers and a second lane, #b, registered as the resident #queue.
+On a workspace with markers and two lanes besides #default, #b and #c, registered as the
+resident #queue.
 "
 Class {
 	#name : #SoilQueueLaneSettingsTest,
