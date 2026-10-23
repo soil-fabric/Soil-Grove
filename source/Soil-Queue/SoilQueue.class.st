@@ -118,22 +118,20 @@ SoilQueue >> add: anEntry to: aLaneName in: aTransaction [
 
 { #category : #lanes }
 SoilQueue >> addLane: aSymbol format: aFormat [
-	"a lane more, stored in my workspace under the next free marker and handed out from at
-	once -- a lane that took entries and handed nothing out until the next start would only
-	collect them. Until that start configures it, it takes the values of my default lane,
-	the worker limit among them -- but places of its own. Answers the live lane.
+	"a lane more, stored in my workspace under the next free marker. It takes entries at
+	once, and I hand it out from when my lanes are built next, like any setting. With a
+	resident that is my next start, which builds the lanes from my workspace and configures
+	them from my description. Without one, my lanes are built where I am created on my
+	workspace, and a start keeps them: the lane comes with a queue created anew there. So
+	the place to add a lane is before a start -- a migration when the database opens, a
+	registration before the queue runs.
 
-	Not started, I have no live lanes to add it to, and I hand nothing out anyway: the lane
-	is only stored, the next start builds it with the others, and I answer nil"
+	Nothing takes a lane out again: one that is not used any more costs its marker and a
+	look at it in every step"
 
-	| lane |
 	self withTransactionDo: [ :txn |
 		(self workspaceIn: txn) addLaneNamed: aSymbol format: aFormat.
-		txn commit ].
-	self hasLiveLanes ifFalse: [ ^ nil ].
-	lane := SoilQueueLane named: aSymbol configuredFrom: self defaultLane.
-	lanes := lanes copyWith: lane.
-	^ lane
+		txn commit ]
 ]
 
 { #category : #working }
@@ -209,8 +207,9 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTrans
 	Under the mutex, because this is where competing workers meet. What crosses the
 	boundary is a key: the transaction this scanned in is not the one the work happens in.
 
-	Nothing goes out for a lane that has been removed; a worker the dispatcher started for it
-	just before runs dry."
+	Nothing goes out for a lane I no longer hand out from: a start builds my lanes anew, and
+	a worker of a lane from before it that is still running runs dry. The step its end
+	brings starts workers on the new ones."
 
 	^ mutex critical: [
 		| workspace found |
@@ -370,7 +369,7 @@ SoilQueue >> lane: aSymbol [
 
 	^ self liveLanes
 		detect: [ :each | each name = aSymbol ]
-		ifNone: [ self error: 'no lane named ', aSymbol printString ]
+		ifNone: [ self error: 'no live lane named ', aSymbol printString ]
 ]
 
 { #category : #accessing }
@@ -537,46 +536,6 @@ SoilQueue >> release: aKey [
 	"the entry is no longer out with anyone, whatever became of it"
 
 	mutex critical: [ inFlight remove: aKey ifAbsent: [ nil ] ]
-]
-
-{ #category : #lanes }
-SoilQueue >> removeLane: aSymbol [
-	"take out a lane that has nothing left in it"
-
-	self removeLane: aSymbol discardingEntries: false
-]
-
-{ #category : #lanes }
-SoilQueue >> removeLane: aSymbol discardingEntries: aBoolean [
-	"take out a lane, from my workspace and from what I hand out from. Not while a worker of
-	it runs: it may be in the middle of an entry, and it runs dry by itself.
-
-	Out of what I hand out from first, under the mutex that handing out goes under, so that
-	nothing of it goes out from then on. If my workspace refuses -- entries left and aBoolean
-	false -- the lane comes back. The default lane stays: entries that name no lane go there,
-	and a lane added at runtime runs like it.
-
-	Not started, I hand nothing out and have no live lane to take out: only my workspace
-	gives it up, and it refuses the same things"
-
-	| lane |
-	self hasLiveLanes ifFalse: [
-		^ self withTransactionDo: [ :txn |
-			(self workspaceIn: txn) removeLaneNamed: aSymbol discardingEntries: aBoolean.
-			txn commit ] ].
-	lane := self lane: aSymbol.
-	lane == self defaultLane ifTrue: [ ^ self error: 'the default lane cannot be removed' ].
-	mutex critical: [
-		(workers anySatisfy: [ :each | each lane name = aSymbol ]) ifTrue: [
-			^ self error: 'the lane ' , aSymbol printString , ' still has workers running' ].
-		lanes := lanes copyWithout: lane ].
-	[ self withTransactionDo: [ :txn |
-		(self workspaceIn: txn) removeLaneNamed: aSymbol discardingEntries: aBoolean.
-		txn commit ] ]
-		on: Error
-		do: [ :refusal |
-			mutex critical: [ lanes := lanes copyWith: lane ].
-			refusal pass ]
 ]
 
 { #category : #running }

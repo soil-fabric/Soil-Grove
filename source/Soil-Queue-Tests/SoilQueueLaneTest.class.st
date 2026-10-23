@@ -134,9 +134,8 @@ SoilQueueLaneTest >> testAChangedValueHoldsFromTheNextStart [
 
 { #category : #tests }
 SoilQueueLaneTest >> testADisabledQueueTakesALaneAndHasItOnceItIsEnabled [
-	"switched off, the queue is loaded and never started, so it has no live lanes to add
-	one to. The lane is stored all the same, and the start that switches the queue on
-	builds it with the others"
+	"switched off, the queue is loaded and never started. The lane is stored as on any
+	queue, and the start that switches the queue on builds it with the others"
 
 	| queue txn |
 	soil addResidentDescription: (SoilQueueDescription
@@ -151,7 +150,7 @@ SoilQueueLaneTest >> testADisabledQueueTakesALaneAndHasItOnceItIsEnabled [
 	  queue restartIn: txn ] ensure: [ txn abort ].
 	self assert: queue isDisabled.
 
-	self assert: (queue addLane: #b format: SoilQueueTimeOrderedKeyFormat new) isNil.
+	queue addLane: #b format: SoilQueueTimeOrderedKeyFormat new.
 	self assert: queue lanes isEmpty.
 
 	self inTransaction: [ :t | (self descriptionIn: t) enable ].
@@ -160,27 +159,6 @@ SoilQueueLaneTest >> testADisabledQueueTakesALaneAndHasItOnceItIsEnabled [
 	  self assert: queue isStarted.
 	  self assert: (queue lane: #b) name equals: #b ]
 		ensure: [ self stop: queue ]
-]
-
-{ #category : #tests }
-SoilQueueLaneTest >> testADisabledQueueGivesALaneUp [
-	"made by its description and not started, the queue has no live lane to take out; its
-	workspace gives the lane up all the same"
-
-	| workspace queue txn |
-	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1.
-	workspace addLaneNamed: #b format: SoilQueueTimeOrderedKeyFormat new.
-	soil addResidentDescription: (SoilQueueDescription named: #work workspace: workspace).
-	txn := soil newTransaction.
-	[ queue := ((self descriptionIn: txn) newInstanceIn: txn)
-		supervisor: soil newResidentSupervisor;
-		yourself ] ensure: [ txn abort ].
-
-	queue removeLane: #b.
-	txn := soil newTransaction.
-	[ self
-		assert: ((self descriptionIn: txn) workspace lanes collect: [ :each | each name ])
-		equals: #( #default ) ] ensure: [ txn abort ]
 ]
 
 { #category : #tests }
