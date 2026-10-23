@@ -88,11 +88,30 @@ SoilQueueLaneSettingsTest >> tearDown [
 
 { #category : #tests }
 SoilQueueLaneSettingsTest >> testALaneSettingIsCheckedWhenItIsSet [
-	"not at the next start, where it would stop the resident from coming up"
+	"not at the next start, where it would stop the resident from coming up -- for one lane
+	as for all of them"
 
 	self configure: [ :description |
 		self should: [ description orphanedRetryLimit: -1 forLane: #b ] raise: Error.
-		self should: [ description workerLimit: 0 forLane: #b ] raise: Error ]
+		self should: [ description workerLimit: 0 forLane: #b ] raise: Error.
+		self should: [ description orphanedRetryLimit: -1 ] raise: Error.
+		self should: [ description workerLimit: 0 ] raise: Error ]
+]
+
+{ #category : #tests }
+SoilQueueLaneSettingsTest >> testALaneSetToNoLimitHasNone [
+	"set to nil for one lane counts as set: it goes without the limit that holds for all
+	the others"
+
+	| queue |
+	self configure: [ :description |
+		description
+			orphanedRetryLimit: 5;
+			orphanedRetryLimit: nil forLane: #b ].
+	queue := self queue.
+
+	self assert: (queue lane: #b) orphanedRetryLimit isNil.
+	self assert: (queue lane: #c) orphanedRetryLimit equals: 5
 ]
 
 { #category : #tests }

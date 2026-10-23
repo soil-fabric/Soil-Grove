@@ -80,12 +80,14 @@ SoilQueueGroupedDispatchTest >> queue [
 
 	| txn |
 	txn := soil newTransaction.
-	^ [ | queue |
-	  queue := SoilQueueTestUnforkedQueue from: ((SoilQueue onWorkspace: (self workspaceIn: txn) in: txn)
+	^ [ SoilQueueTestUnforkedQueue from: ((SoilQueue
+			onWorkspace: (self workspaceIn: txn)
+			configuredFrom: (SoilQueueDescription new
+				workerLimit: 10 forLane: #groups;
+				yourself)
+			in: txn)
 		clock: clock;
-		yourself).
-	  (queue lane: #groups) workerLimit: 10.
-	  queue ]
+		yourself) ]
 		ensure: [ txn abort ]
 ]
 

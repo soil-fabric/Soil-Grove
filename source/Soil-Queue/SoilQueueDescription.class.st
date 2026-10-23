@@ -10,10 +10,16 @@ entries. I am read to configure the queue at every start, and only then: my valu
 its lanes, which hold them until the next start. The queue reaches its
 workspace by id.
 
+I am the one place these values are set and checked. A live lane has no setters; it reads
+what holds for it off me once, when it is built (#valueAt:forLane:). A queue without a
+resident is configured the same way, from one of me that is never stored
+(SoilQueue class>>#onWorkspace:configuredFrom:in:).
+
 Every value is set for all lanes, and may be set for one lane in particular, by the same
 selector with forLane:. A lane takes what is set for it and the rest from what is set
 for all -- the worker limit as much as the limit for entries given back and the backoff.
-Kept by lane name, since the lanes themselves are the workspace's.
+Set to nil for a lane counts as set: a lane can go without a limit that holds for all
+the others. Kept by lane name, since the lanes themselves are the workspace's.
 
 The workspace is a cluster root of its own. I make it one in #initializeFrom:, which is
 where a description creates the objects its resident works on, and it makes the index
@@ -98,18 +104,20 @@ SoilQueueDescription >> backoffCap: aDuration forLane: aSymbol [
 	(self valuesForLane: aSymbol) at: #backoffCap put: aDuration
 ]
 
-{ #category : #lanes }
-SoilQueueDescription >> configureLane: aLane [
-	"what is set for this lane in particular, over the values it took from those for all
-	lanes. Only what is set: a lane with nothing of its own keeps them all"
+{ #category : #private }
+SoilQueueDescription >> checkOrphanedRetryLimit: anInteger [
+	"when it is set, for all lanes or for one, and not at the next start, where it would
+	keep the resident from coming up"
 
-	| values |
-	values := laneValues ifNil: [ ^ self ].
-	values := values at: aLane name ifAbsent: [ ^ self ].
-	values at: #orphanedRetryLimit ifPresent: [ :limit | aLane orphanedRetryLimit: limit ].
-	values at: #backoffBase ifPresent: [ :duration | aLane backoffBase: duration ].
-	values at: #backoffCap ifPresent: [ :duration | aLane backoffCap: duration ].
-	values at: #workerLimit ifPresent: [ :limit | aLane workerLimit: limit ]
+	(anInteger notNil and: [ anInteger < 0 ]) ifTrue: [
+		self error: 'a negative number of retries cannot be used up' ]
+]
+
+{ #category : #private }
+SoilQueueDescription >> checkWorkerLimit: anInteger [
+	"when it is set, for all lanes or for one -- see #checkOrphanedRetryLimit:"
+
+	anInteger < 1 ifTrue: [ self error: 'a lane with no worker would never run' ]
 ]
 
 { #category : #initialization }
@@ -161,8 +169,7 @@ SoilQueueDescription >> orphanedRetryLimit [
 { #category : #accessing }
 SoilQueueDescription >> orphanedRetryLimit: anInteger [
 
-	(anInteger notNil and: [ anInteger < 0 ]) ifTrue: [
-		^ self error: 'a negative number of retries cannot be used up' ].
+	self checkOrphanedRetryLimit: anInteger.
 	orphanedRetryLimit := anInteger
 ]
 
@@ -171,8 +178,7 @@ SoilQueueDescription >> orphanedRetryLimit: anInteger forLane: aSymbol [
 	"nil for no limit, as for all lanes -- set for this lane, it overrides a limit set for
 	all of them"
 
-	(anInteger notNil and: [ anInteger < 0 ]) ifTrue: [
-		^ self error: 'a negative number of retries cannot be used up' ].
+	self checkOrphanedRetryLimit: anInteger.
 	(self valuesForLane: aSymbol) at: #orphanedRetryLimit put: anInteger
 ]
 
@@ -188,6 +194,19 @@ SoilQueueDescription >> setName: aSymbol workspace: aQueueWorkspace [
 
 	name := aSymbol.
 	workspace := aQueueWorkspace
+]
+
+{ #category : #lanes }
+SoilQueueDescription >> valueAt: aValueName forLane: aSymbol [
+	"what holds for that lane: what is set for it in particular, else what is set for all
+	lanes, else the default -- the getter of that name answers the last two. Set to nil for
+	the lane counts as set, which is how a lane goes without a limit that holds for all the
+	others. Read once, when the lane is built"
+
+	laneValues ifNotNil: [
+		(laneValues at: aSymbol ifAbsent: [ nil ]) ifNotNil: [ :values |
+			(values includesKey: aValueName) ifTrue: [ ^ values at: aValueName ] ] ].
+	^ self perform: aValueName
 ]
 
 { #category : #lanes }
@@ -212,7 +231,7 @@ SoilQueueDescription >> workerLimit [
 { #category : #accessing }
 SoilQueueDescription >> workerLimit: anInteger [
 
-	anInteger < 1 ifTrue: [ ^ self error: 'a lane with no worker would never run' ].
+	self checkWorkerLimit: anInteger.
 	workerLimit := anInteger
 ]
 
@@ -221,7 +240,7 @@ SoilQueueDescription >> workerLimit: anInteger forLane: aSymbol [
 	"how many workers of that lane may run at once. Its places are its own: no other lane
 	takes them, and it takes none of theirs"
 
-	anInteger < 1 ifTrue: [ ^ self error: 'a lane with no worker would never run' ].
+	self checkWorkerLimit: anInteger.
 	(self valuesForLane: aSymbol) at: #workerLimit put: anInteger
 ]
 

@@ -3,7 +3,8 @@ How many workers run at once, lane by lane: every lane has a worker limit, a cou
 places of its own, and lanes share none.
 
 On a workspace with two lanes, #a and #b, and a queue made on it without a resident, so
-that the limits are set in code. The workers are not forked, and counted as started.
+that the limits come from a description handed to it. The workers are not forked, and
+counted as started.
 "
 Class {
 	#name : #SoilQueueWorkerLimitTest,
@@ -65,9 +66,18 @@ SoilQueueWorkerLimitTest >> put: anInteger into: aSymbol dueAt: aDateAndTime [
 { #category : #helpers }
 SoilQueueWorkerLimitTest >> queue [
 
+	^ self queueWith: SoilQueueDescription new
+]
+
+{ #category : #helpers }
+SoilQueueWorkerLimitTest >> queueWith: aDescription [
+
 	| txn |
 	txn := soil newTransaction.
-	^ [ SoilQueueTestUnforkedQueue from: ((SoilQueue onWorkspace: (self workspaceIn: txn) in: txn)
+	^ [ SoilQueueTestUnforkedQueue from: ((SoilQueue
+			onWorkspace: (self workspaceIn: txn)
+			configuredFrom: aDescription
+			in: txn)
 		clock: clock;
 		yourself) ]
 		ensure: [ txn abort ]
@@ -134,8 +144,9 @@ SoilQueueWorkerLimitTest >> testAKeyThatIsOutAsksForNoWorker [
 
 	| queue running |
 	self put: 2 into: #a.
-	queue := self queue.
-	(queue lane: #a) workerLimit: 3.
+	queue := self queueWith: (SoilQueueDescription new
+		workerLimit: 3 forLane: #a;
+		yourself).
 	running := SoilQueueWorker on: queue lane: (queue lane: #a).
 	queue workerStarting: running.
 	self assert: (queue assignNextIn: (queue lane: #a)) notNil.
@@ -152,8 +163,9 @@ SoilQueueWorkerLimitTest >> testALaneIsNotCrowdedOutByAnother [
 	| queue |
 	self put: 3 into: #a.
 	self put: 3 into: #b.
-	queue := self queue.
-	(queue lane: #a) workerLimit: 2.
+	queue := self queueWith: (SoilQueueDescription new
+		workerLimit: 2 forLane: #a;
+		yourself).
 	queue runStep.
 
 	self assert: (self startedFor: #a in: queue) equals: 2.
@@ -187,7 +199,7 @@ SoilQueueWorkerLimitTest >> testAWorkerThatEndsLetsTheNextStepStartAnother [
 
 	| queue ending |
 	queue := self queue.
-	ending := SoilQueueWorker on: queue lane: (SoilQueueLane named: #a).
+	ending := SoilQueueWorker on: queue lane: (SoilQueueLane named: #a configuredFrom: SoilQueueDescription new).
 	queue workerStarting: ending.
 	self put: 1 into: #a.
 	queue runStep.
@@ -267,8 +279,10 @@ SoilQueueWorkerLimitTest >> testByDefaultEveryLaneHasOnePlaceOfItsOwn [
 
 { #category : #tests }
 SoilQueueWorkerLimitTest >> testNoLaneWithoutAPlace [
+	"refused where it is set, for all lanes as for one"
 
-	self should: [ (SoilQueueLane named: #none) workerLimit: 0 ] raise: Error
+	self should: [ SoilQueueDescription new workerLimit: 0 ] raise: Error.
+	self should: [ SoilQueueDescription new workerLimit: 0 forLane: #a ] raise: Error
 ]
 
 { #category : #helpers }
