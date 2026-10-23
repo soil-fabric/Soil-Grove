@@ -252,9 +252,10 @@ SoilQueueEntry >> orphanedRetries [
 { #category : #working }
 SoilQueueEntry >> performIn: aTransaction [
 	"do one work unit in the transaction the queue opened, and answer what comes next:
-	#more or #finished. A unit that failed at its work for a reason of its own answers
-	#finished as well -- a failure at the work is a result, and the target carries it. One
-	that throws is given up on, or given back when the error is Soil's (SoilQueue>>#workOnce:).
+	#more or #finished. A unit that has put a failure of its target on the target itself
+	answers #finished too: that is my end, and the target carries the failure. One that
+	throws fails at its work and is given up on (#giveUp:in:), or is given back when the
+	error is Soil's (SoilQueue>>#workOnce:).
 	No commit of my own -- the result, the index removal and any follow-up entry belong in
 	the queue's single commit, so that the state where the work wants to go on and no entry
 	is left cannot arise.

@@ -7,7 +7,7 @@ That is not a third kind of queue. It is the time ordered lane when nobody sets 
 and these tests are the proof: the design has to carry it without a special case.
 
 Driven on a clock that stands still until it is moved, and moved a second on after every
-entry that is put in. The order of putting in is kept to the millisecond and no finer:
+entry #put:using: puts in -- every test that puts in more than one entry goes through it. The order of putting in is kept to the millisecond and no finer:
 entries put in within one millisecond count as simultaneous, and their random ids order
 them by chance (SoilQueueTimeOrderedKeyFormat). Without the move every entry of a test
 would share one time.

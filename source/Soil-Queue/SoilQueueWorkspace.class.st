@@ -310,10 +310,11 @@ SoilQueueWorkspace >> moveKey: aKey for: anEntry [
 	Which key that is, is the lane's format's to say. One whose keys carry no due time
 	answers the key the entry has: it waits where it is, and its due time is read from it.
 
-	Two things are the caller's, in the same commit: #readyAt is set before, since the new
-	key is read off it, and a claimed entry is given back (SoilQueueEntry>>#releaseClaim) --
-	moving it does not. Both callers, SoilQueue>>#workOnce: on #more and SoilQueue>>#recover:,
-	do both."
+	Two things are the caller's, in the same commit: #readyAt is what it should be before,
+	since the new key is read off it, and a claimed entry is given back
+	(SoilQueueEntry>>#releaseClaim) -- moving it does not. SoilQueue>>#recover: sets the
+	time and gives the claim back itself; on #more, SoilQueue>>#workOnce: gives the claim
+	back, and the time is what the work unit left."
 
 	| lane newKey |
 	lane := self laneFor: aKey.

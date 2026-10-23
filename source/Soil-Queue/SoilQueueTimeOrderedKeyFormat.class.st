@@ -8,10 +8,11 @@ be moved to a new due time under backoff.
 
 Time is written as milliseconds since the Unix epoch in eight bytes. Seconds would put
 too many entries on one key and leave their order to the id alone; microseconds would
-promise an order the queue does not keep. What is put in within one millisecond -- several
-entries in one transaction, say -- counts as simultaneous, and the random id orders it by
-chance (SoilQueueEntry class>>#newId): an order among those would need a counter that
-every putting in writes to, and that is where write conflicts come from.
+promise an order the queue does not keep. What is put in within one millisecond counts as
+simultaneous, and the random id orders it by chance (SoilQueueEntry class>>#newId). An
+order across transactions would need a counter that every putting in writes to, and that
+is where write conflicts come from; the queue keeps the order of putting in to the
+millisecond and no finer.
 "
 Class {
 	#name : #SoilQueueTimeOrderedKeyFormat,

@@ -91,10 +91,10 @@ SoilQueueKeyFormat >> nextDueIn: aLaneDescription of: aQueueWorkspace at: aDateA
 
 	Only pending entries are handed out. An entry that says claimed belongs to a worker, or
 	to the recovery pass if no worker holds it -- and it stays in the ordering either way,
-	because a claim does not change a key. Without this a claimed entry nobody holds -- one
-	of the run before, until the first step gives it back, or one whose giving back failed
-	-- would be handed out at once, refused by its own claim, and sent to be given back
-	again, for ever. A key that is out is passed without its entry being read"
+	because a claim does not change a key. Without this a claimed entry nobody holds would
+	be handed out, refused by its own claim, and sent back through SoilQueue>>#stepFailed:on:
+	-- a step error and a count for nothing; one whose giving back keeps failing would come
+	round for ever. A key that is out is passed without its entry being read"
 
 	| range |
 	range := aLaneDescription range.

@@ -11,9 +11,10 @@ it, and my configuration -- and the coordinating part is mine.
 Being live as long as the database is open, carrying runtime state, and having a
 persisted description is precisely what a resident is, so I am one. Nothing about that
 forces a registration on anyone: created on my workspace (#onWorkspace:in:) I get a
-supervisor of my own that supervises nothing and only opens my transactions, and I hand
-out entries whether I am started or not. Not started, I have no dispatcher and no workers,
-and whoever drives me is the only one at the mutex.
+supervisor of my own that supervises nothing -- it opens my transactions and passes on
+the lines I emit -- and I hand out entries whether I am started or not. Not started, I
+have no dispatcher process: a worker runs only when whoever drives me takes a step itself
+(#runStep), and otherwise that driver is the only one at the mutex.
 
 Mine is what competing workers meet at, and all of it lives in memory only: the mutex,
 the set of keys that are out, the workers that are running, the wake time and my live
@@ -514,8 +515,9 @@ SoilQueue >> recoverOrphanedClaims [
 	on the same instance. Within a start everything claimed after this is claimed by a
 	worker of mine, and #isHolding: says so for as long as the worker is on it -- which is
 	also why asking again at a start is safe: a worker of the run before that is still on
-	its entry holds it. The one claim a start leaves behind itself, a failed step whose
-	giving back failed as well, waits for the next start (#stepFailed:on:).
+	its entry holds it. The claims a start leaves behind itself -- a worker terminated in
+	its stop, a failed step whose giving back failed as well (#stepFailed:on:) -- wait for
+	the next start.
 
 	One orphan that cannot be given back does not keep the others waiting. It is reported
 	like any failed step and stays claimed, and the next start tries it again."
