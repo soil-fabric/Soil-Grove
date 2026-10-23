@@ -293,6 +293,25 @@ SoilQueueCrashTest >> testAContinuingEntryPicksUpWhereItStopped [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testAnEntryThatIsParkedIsSaid [
+	"a dead letter is for somebody to look at, and nobody is woken for it. Given back, an
+	entry says nothing"
+
+	| key |
+	self orphanedRetryLimit: 1.
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self crashBeforeTheNextStepOn: key.
+	self queue recoverOrphanedClaims.
+	self assert: (soil reportedMatching: 'parked') isEmpty.
+
+	self crashBeforeTheNextStepOn: key.
+	self queue recoverOrphanedClaims.
+	self assert: (soil reportedMatching: 'parked') size equals: 1.
+	self assert: ((soil reportedMatching: 'parked') first includesSubstring: 'SoilQueueTestRepeatingEntry').
+	self assert: ((soil reportedMatching: 'parked') first includesSubstring: 'lost its worker 2 times in a row')
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testAnEntryThatKeepsLosingItsWorkerIsParked [
 	"what takes its worker with it every time -- the poison entry -- stops coming back once
 	the limit is used up. It is parked, not released: releasing it would hand the next
@@ -414,6 +433,30 @@ SoilQueueCrashTest >> testAnOrphanThatCannotBeGivenBackDoesNotKeepTheOthers [
 	self assert: (self stateOf: failing) equals: #claimed.
 	self assert: queue stepErrorCount equals: 1.
 	self assert: queue lastStepError messageText equals: 'the cleanup cannot be done'
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testAParkThatDoesNotGoThroughIsNotSaid [
+	"the line comes once the commit has gone through. Here the cleanup writes the target,
+	and another transaction has written it in between: the commit fails, the entry stays
+	claimed for the next start, and a line would tell of a dead letter that is not there"
+
+	| key queue txn |
+	key := self put: [ :target | SoilQueueTestCompensatingEntry on: target ].
+	self crashAfterAnEffectOn: key.
+	txn := soil newTransaction.
+	[ queue := SoilQueueTestInterleavingQueue
+		onWorkspace: (self workspaceIn: txn)
+		configuredFrom: (SoilQueueDescription new
+			orphanedRetryLimit: 0;
+			yourself)
+		in: txn ] ensure: [ txn abort ].
+	queue interleave: [
+		self inTransaction: [ :other | (other root at: #target) addEffect: #meanwhile ] ].
+
+	self should: [ queue recover: (self currentKeyOf: key) ] raise: Error.
+	self assert: (soil reportedMatching: 'parked') isEmpty.
+	self assert: (self stateOf: key) equals: #claimed
 ]
 
 { #category : #tests }
