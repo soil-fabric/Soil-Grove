@@ -88,11 +88,49 @@ SoilQueueLaneSettingsTest >> tearDown [
 
 { #category : #tests }
 SoilQueueLaneSettingsTest >> testALaneSettingIsCheckedWhenItIsSet [
-	"not at the next start, where it would stop the resident from coming up"
+	"not at the next start, where it would stop the resident from coming up -- for one lane
+	as for all of them"
 
 	self configure: [ :description |
 		self should: [ description orphanedRetryLimit: -1 forLane: #b ] raise: Error.
-		self should: [ description workerLimit: 0 forLane: #b ] raise: Error ]
+		self should: [ description workerLimit: 0 forLane: #b ] raise: Error.
+		self should: [ description orphanedRetryLimit: -1 ] raise: Error.
+		self should: [ description workerLimit: 0 ] raise: Error.
+		self should: [ description backoffBase: nil forLane: #b ] raise: Error.
+		self should: [ description backoffCap: -1 seconds ] raise: Error ]
+]
+
+{ #category : #tests }
+SoilQueueLaneSettingsTest >> testALaneSetToNoLimitHasNone [
+	"set to nil for one lane counts as set: it goes without the limit that holds for all
+	the others"
+
+	| queue |
+	self configure: [ :description |
+		description
+			orphanedRetryLimit: 5;
+			orphanedRetryLimit: nil forLane: #b ].
+	queue := self queue.
+
+	self assert: (queue lane: #b) orphanedRetryLimit isNil.
+	self assert: (queue lane: #c) orphanedRetryLimit equals: 5
+]
+
+{ #category : #tests }
+SoilQueueLaneSettingsTest >> testARefusedSettingThatIsProceededIsNotStored [
+	"proceeded in the debugger, a refusal returns -- and what it refused is not stored all
+	the same. Nothing checks it again later"
+
+	| description proceed |
+	description := SoilQueueDescription new.
+	proceed := [ :aBlock | aBlock on: Error do: [ :error | error resumeUnchecked: nil ] ].
+	proceed value: [ description workerLimit: 0 ].
+	proceed value: [ description orphanedRetryLimit: -1 forLane: #b ].
+	proceed value: [ description backoffBase: nil forLane: #b ].
+
+	self assert: description workerLimit equals: 1.
+	self assert: (description valueAt: #orphanedRetryLimit forLane: #b) isNil.
+	self assert: (description valueAt: #backoffBase forLane: #b) equals: 1 second
 ]
 
 { #category : #tests }

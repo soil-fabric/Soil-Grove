@@ -5,9 +5,11 @@ A lane is a place the queue hands entries out from, with a limit for entries giv
 a backoff and a worker limit of its own -- how many of its workers may run at once.
 Lanes share no places. Its stored half, SoilQueueLaneDescription, lies in the workspace
 and says where its entries are; I say how they are tried again. The queue builds me from
-both when it is created and again at every start, and after that nobody reads the
-configuration for me: a changed setting holds from the next start on, the way it does
-for a resident. Without a resident, whoever creates the queue sets my values in code.
+both, and after that nobody reads the configuration for me. With a resident it does so at
+every start, so a changed setting holds from the next start on. Without one, it does so
+where it is created on its workspace, from a description that is never stored, and again
+when its creator configures it anew. I have no setters for these values: a description
+is the one place they are set and checked.
 
 What I decide: whether an entry that was given back may come back once more, and how long
 it waits before it does.
@@ -29,14 +31,6 @@ Class {
 	],
 	#category : #'Soil-Queue'
 }
-
-{ #category : #'instance creation' }
-SoilQueueLane class >> named: aSymbol [
-	"a lane with the default configuration -- the one a description answers when nothing is
-	set on it, so that the defaults are written down in one place"
-
-	^ self named: aSymbol configuredFrom: SoilQueueDescription new
-]
 
 { #category : #'instance creation' }
 SoilQueueLane class >> named: aSymbol configuredFrom: aDescription [
@@ -65,32 +59,21 @@ SoilQueueLane >> backoffBase [
 ]
 
 { #category : #retrying }
-SoilQueueLane >> backoffBase: aDuration [
-
-	backoffBase := aDuration
-]
-
-{ #category : #retrying }
 SoilQueueLane >> backoffCap [
 
 	^ backoffCap
 ]
 
-{ #category : #retrying }
-SoilQueueLane >> backoffCap: aDuration [
-
-	backoffCap := aDuration
-]
-
 { #category : #initialization }
 SoilQueueLane >> configureFrom: aDescription [
-	"take my values off a description, defaults included. Called when the queue is created
-	and at every start -- and only then"
+	"take the values that hold for me off a description: what is set for me, else what is
+	set for all lanes, else the defaults (#valueAt:forLane:). Called when the queue builds
+	its lanes, and only then"
 
-	orphanedRetryLimit := aDescription orphanedRetryLimit.
-	backoffBase := aDescription backoffBase.
-	backoffCap := aDescription backoffCap.
-	workerLimit := aDescription workerLimit
+	orphanedRetryLimit := aDescription valueAt: #orphanedRetryLimit forLane: name.
+	backoffBase := aDescription valueAt: #backoffBase forLane: name.
+	backoffCap := aDescription valueAt: #backoffCap forLane: name.
+	workerLimit := aDescription valueAt: #workerLimit forLane: name
 ]
 
 { #category : #accessing }
@@ -118,14 +101,6 @@ SoilQueueLane >> name [
 SoilQueueLane >> orphanedRetryLimit [
 
 	^ orphanedRetryLimit
-]
-
-{ #category : #retrying }
-SoilQueueLane >> orphanedRetryLimit: anInteger [
-
-	(anInteger notNil and: [ anInteger < 0 ]) ifTrue: [
-		^ self error: 'a negative number of retries cannot be used up' ].
-	orphanedRetryLimit := anInteger
 ]
 
 { #category : #printing }
@@ -157,9 +132,3 @@ SoilQueueLane >> workerLimit [
 	^ workerLimit
 ]
 
-{ #category : #accessing }
-SoilQueueLane >> workerLimit: anInteger [
-
-	anInteger < 1 ifTrue: [ ^ self error: 'a lane with no place would never let a worker run' ].
-	workerLimit := anInteger
-]

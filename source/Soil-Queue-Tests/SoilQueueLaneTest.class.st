@@ -4,8 +4,8 @@ A lane holds its values; nobody reads the configuration for it once the queue ru
 With a resident, the values come from the description at every start, and only then -- a
 setting changed on the description is configuration for the next start. Before its first
 start the queue has no live lanes at all.
-Without one, the queue is created on its workspace and whoever does that sets the values
-on the lane in code.
+Without one, the queue is created on its workspace and whoever does that hands it a
+description that is never stored.
 
 Driven on a clock that stands still until it is moved.
 "
@@ -211,8 +211,9 @@ SoilQueueLaneTest >> testAQueueThatIsNotStartedSaysSo [
 ]
 
 { #category : #tests }
-SoilQueueLaneTest >> testWithoutAResidentTheValuesAreSetOnTheLane [
-	"no description to read them from, so whoever creates the queue sets them"
+SoilQueueLaneTest >> testWithoutAResidentChangedValuesComeByConfiguringAgain [
+	"a start keeps the lanes of a queue without a resident; its creator hands it a changed
+	description, and the lanes are built anew from it, as a start would"
 
 	| workspace queue txn |
 	self inTransaction: [ :t |
@@ -223,11 +224,38 @@ SoilQueueLaneTest >> testWithoutAResidentTheValuesAreSetOnTheLane [
 		created initializeIn: t ].
 	workspace := [ :aTransaction | aTransaction root at: #queue ].
 	txn := soil newTransaction.
-	[ queue := (SoilQueue onWorkspace: (workspace value: txn) in: txn)
-		clock: clock;
-		yourself ] ensure: [ txn abort ].
-	self assert: (queue lane: #default) backoffBase equals: 1 second.
+	[ queue := SoilQueue onWorkspace: (workspace value: txn) in: txn.
+	  queue
+		configureFrom: (SoilQueueDescription new
+			backoffBase: 1 minute;
+			yourself)
+		in: txn ] ensure: [ txn abort ].
 
-	(queue lane: #default) backoffBase: 1 minute.
+	self assert: (queue lane: #default) backoffBase equals: 1 minute
+]
+
+{ #category : #tests }
+SoilQueueLaneTest >> testWithoutAResidentTheValuesComeFromADescriptionThatIsNotStored [
+	"no stored description to read them from, so whoever creates the queue hands it one.
+	Without one, the defaults hold"
+
+	| workspace queue txn |
+	self inTransaction: [ :t |
+		| created |
+		created := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24.
+		t root at: #queue put: created.
+		t makeRoot: created.
+		created initializeIn: t ].
+	workspace := [ :aTransaction | aTransaction root at: #queue ].
+	txn := soil newTransaction.
+	[ queue := SoilQueue onWorkspace: (workspace value: txn) in: txn.
+	  self assert: (queue lane: #default) backoffBase equals: 1 second.
+	  queue := SoilQueue
+		onWorkspace: (workspace value: txn)
+		configuredFrom: (SoilQueueDescription new
+			backoffBase: 1 minute;
+			yourself)
+		in: txn ] ensure: [ txn abort ].
+
 	self assert: ((queue lane: #default) retryDelayAfter: 1) equals: 1 minute
 ]

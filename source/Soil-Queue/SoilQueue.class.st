@@ -25,8 +25,9 @@ backoff of its own; its stored half lies in my workspace, its live half is a
 SoilQueueLane I build at every start, and only then: a changed setting holds from the
 next start on. Made by my description and not started yet -- loaded but switched off,
 say -- I have no live lanes, and whoever asks for one hears that I am not started.
-Without a resident, whoever creates me on a workspace (#onWorkspace:in:) gets the lanes
-built right there and sets their values in code.
+Without a resident, whoever creates me on a workspace gets the lanes built right there,
+from a description that is never stored (#onWorkspace:configuredFrom:in:), and hands me
+a changed one to change them (#configureFrom:in:).
 
 Every lane has a worker limit, a count of places of its own; lanes share no places.
 Before I start a worker for a lane there has to be a place free under its limit -- if
@@ -59,10 +60,12 @@ Class {
 }
 
 { #category : #'instance creation' }
-SoilQueue class >> onWorkspace: aQueueWorkspace in: aTransaction [
-	"a queue without a resident: created on its workspace, with the default configuration
-	on every lane. Whoever does this sets the values in code -- on the lanes and the worker
-	limit -- and drives the queue itself, or starts it.
+SoilQueue class >> onWorkspace: aQueueWorkspace configuredFrom: aDescription in: aTransaction [
+	"a queue without a resident: created on its workspace, its lanes built right here and
+	configured from aDescription, which is never stored -- the values are set on it, as
+	for a resident, and checked there. Whoever does this drives the queue itself, or
+	starts it; a start keeps the lanes. Changed values come by configuring the queue
+	again with a changed description (#configureFrom:in:)
 
 	A supervisor of its own comes along, for the transactions the queue opens and the
 	lines it emits. It supervises nothing: the queue is not registered anywhere"
@@ -71,8 +74,18 @@ SoilQueue class >> onWorkspace: aQueueWorkspace in: aTransaction [
 		name: #queue;
 		supervisor: aTransaction soil newResidentSupervisor;
 		workspaceId: (aTransaction objectIdOf: aQueueWorkspace);
-		configureFrom: SoilQueueDescription new in: aTransaction;
+		configureFrom: aDescription in: aTransaction;
 		yourself
+]
+
+{ #category : #'instance creation' }
+SoilQueue class >> onWorkspace: aQueueWorkspace in: aTransaction [
+	"the same with the defaults on every lane"
+
+	^ self
+		onWorkspace: aQueueWorkspace
+		configuredFrom: SoilQueueDescription new
+		in: aTransaction
 ]
 
 { #category : #accessing }
@@ -122,7 +135,8 @@ SoilQueue >> addLane: aSymbol format: aFormat [
 	once, and I hand it out from when my lanes are built next, like any setting. With a
 	resident that is my next start, which builds the lanes from my workspace and configures
 	them from my description. Without one, my lanes are built where I am created on my
-	workspace, and a start keeps them: the lane comes with a queue created anew there. So
+	workspace, and a start keeps them: the lane comes when my creator configures me again
+	(#configureFrom:in:), or with a queue created anew there. So
 	the place to add a lane is before a start -- a migration when the database opens, a
 	registration before the queue runs.
 
@@ -284,10 +298,11 @@ SoilQueue >> clock: aClock [
 { #category : #configuring }
 SoilQueue >> configureFrom: aDescription in: aTransaction [
 	"build my lanes from the lanes stored in my workspace, each configured from
-	aDescription -- the values for all lanes first, then its own, its worker limit among
-	them. Called at every start, and only then: after that nobody reads the configuration
-	for me. A queue without a resident
-	is configured once, where it is created on its workspace.
+	aDescription -- what is set for it, else what is set for all lanes, else the defaults,
+	its worker limit among them. With a resident this is called at every start, and only
+	then: after that nobody reads the configuration for me. Without one, it is called where
+	I am created on my workspace, and again by my creator with a changed description, as a
+	start would.
 
 	The lanes are built anew, and with them the turn of a grouped lane: it begins at the
 	front again (#lastIssuedKey)"
@@ -295,10 +310,7 @@ SoilQueue >> configureFrom: aDescription in: aTransaction [
 	| workspace |
 	workspace := self workspaceIn: aTransaction.
 	lanes := workspace lanes collect: [ :each |
-		| lane |
-		lane := SoilQueueLane named: each name configuredFrom: aDescription.
-		aDescription configureLane: lane.
-		lane ]
+		SoilQueueLane named: each name configuredFrom: aDescription ]
 ]
 
 { #category : #working }
@@ -365,7 +377,7 @@ SoilQueue >> isHolding: aKey [
 
 { #category : #accessing }
 SoilQueue >> lane: aSymbol [
-	"the live lane of that name, for whoever sets its values in code"
+	"the live lane of that name, for a question about it"
 
 	^ self liveLanes
 		detect: [ :each | each name = aSymbol ]
@@ -444,7 +456,8 @@ SoilQueue >> prepareIn: aTransaction [
 	pending entries, and an orphaned claim alone would wait for the next signal.
 
 	A queue created on its workspace without a resident has no description to read; its
-	values were set in code, and they stay.
+	values came from the one it was created with, and they stay until its creator
+	configures it again.
 
 	Also asks again for claims that nobody holds. A restart does not make a new instance,
 	so what was only asked once per instance would never be asked after the first start --
