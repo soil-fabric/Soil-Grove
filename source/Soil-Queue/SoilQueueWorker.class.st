@@ -47,12 +47,6 @@ SoilQueueWorker class >> on: aQueue lane: aLane [
 		yourself
 ]
 
-{ #category : #testing }
-SoilQueueWorker >> isRunning [
-
-	^ process notNil and: [ process isTerminated not ]
-]
-
 { #category : #accessing }
 SoilQueueWorker >> lane [
 	"the lane I take entries from"

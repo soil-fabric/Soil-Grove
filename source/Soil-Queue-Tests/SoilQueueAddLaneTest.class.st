@@ -218,15 +218,14 @@ SoilQueueAddLaneTest >> testNoEntryIsPutIntoALaneThatIsNotThere [
 
 { #category : #tests }
 SoilQueueAddLaneTest >> testAGapInTheMarkersIsFilledFirst [
-	"lanes laid out by hand, or taken out while that was still possible, can leave a marker
-	free below the last one. It is the lowest free one"
+	"a workspace stored while lanes could still be taken out can have a marker free below
+	the last one. It is the lowest free one. Laid out by hand here, the way such a workspace
+	comes back from disk"
 
 	| workspace |
-	workspace := SoilQueueWorkspace
-		index: ((SoilIndexedDictionary newWithBackend: SoilSkipList)
-			keySize: 24;
-			maxLevel: 16;
-			yourself)
+	workspace := SoilQueueWorkspace new
+		setIndex: (SoilQueueWorkspace newIndexWithBackend: SoilSkipList keySize: 24)
+		deadLetters: (SoilQueueWorkspace newIndexWithBackend: SoilSkipList keySize: 24)
 		keySize: 24
 		lanes: {
 			SoilQueueLaneDescription

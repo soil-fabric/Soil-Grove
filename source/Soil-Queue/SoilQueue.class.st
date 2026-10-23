@@ -88,11 +88,11 @@ SoilQueue class >> onWorkspace: aQueueWorkspace in: aTransaction [
 
 { #category : #accessing }
 SoilQueue class >> soilTransientInstVars [
-	"the inherited entries have to be repeated: a subclass declaration replaces its
-	superclass's rather than adding to it, and a forgotten one would drag a process or a
-	semaphore into a written graph"
+	"a subclass declaration replaces its superclass's rather than adding to it, so the
+	inherited ones are taken from there and not repeated by hand: a forgotten one would drag
+	a process or a semaphore into a written graph"
 
-	^ #( supervisor process workSignal runStrategy mutex inFlight recovered workers clock wakeAt lanes )
+	^ super soilTransientInstVars , #( mutex inFlight recovered workers clock wakeAt lanes )
 ]
 
 { #category : #adding }
@@ -150,17 +150,7 @@ SoilQueue >> addLane: aSymbol format: aFormat [
 ]
 
 { #category : #working }
-SoilQueue >> assignNextDueAt: aDateAndTime in: aTransaction [
-	"the same for my first lane"
-
-	^ self
-		assignNextIn: self defaultLane
-		dueAt: aDateAndTime
-		in: aTransaction
-]
-
-{ #category : #working }
-SoilQueue >> assignNextIn: aLane [
+SoilQueue >> assignNextIn: aLane preferring: aKey [
 	"what a worker of aLane asks for, and the only way it gets an entry -- it never looks at
 	the ordering itself.
 
@@ -171,27 +161,11 @@ SoilQueue >> assignNextIn: aLane [
 
 	A worker that hears nil ends, and whatever is due later is the dispatcher's again. The
 	worker hands nothing on: its end is a signal (SoilQueueWorker>>#run), and the step that
-	brings reads when the next entry falls due."
+	brings reads when the next entry falls due.
 
-	^ self assignNextIn: aLane preferring: nil
-]
-
-{ #category : #working }
-SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime in: aTransaction [
-	"the same with no key to carry on from"
-
-	^ self
-		assignNextIn: aLane
-		dueAt: aDateAndTime
-		preferring: nil
-		in: aTransaction
-]
-
-{ #category : #working }
-SoilQueue >> assignNextIn: aLane preferring: aKey [
-	"what a worker of aLane asks for after it has worked on aKey, nil the first time. On a
-	grouped lane that says which chain it is on, so that it can carry on with it -- see
-	#assignNextIn:
+	aKey is the entry the worker of aLane worked on last, nil the first time. On a grouped
+	lane that says which chain it is on, so that it can carry on with it -- see
+	#assignNextIn:dueAt:preferring:in:
 
 	The read that selects is opened under the mutex, not before it. Soil fixes what a
 	transaction sees when it opens, and a worker gives its entry back under the mutex after

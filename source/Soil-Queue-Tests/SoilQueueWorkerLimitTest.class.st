@@ -2,9 +2,9 @@
 How many workers run at once, lane by lane: every lane has a worker limit, a count of
 places of its own, and lanes share none.
 
-On a workspace with two lanes, #a and #b, and a queue made on it without a resident, so
-that the limits come from a description handed to it. The workers are not forked, and
-counted as started.
+On a workspace with two lanes, #a and #b, besides an empty #default, and a queue made on
+it without a resident, so that the limits come from a description handed to it. The
+workers are not forked, and counted as started.
 "
 Class {
 	#name : #SoilQueueWorkerLimitTest,
@@ -26,15 +26,6 @@ SoilQueueWorkerLimitTest >> inTransaction: aBlock [
 	  txn commit.
 	  answer ]
 		ensure: [ txn isAborted ifFalse: [ txn abort ] ]
-]
-
-{ #category : #helpers }
-SoilQueueWorkerLimitTest >> laneNamed: aSymbol prefix: anInteger [
-
-	^ SoilQueueLaneDescription
-		named: aSymbol
-		range: (SoilPrefixRange prefix: anInteger width: 1 keySize: 24)
-		format: SoilQueueTimeOrderedKeyFormat new
 ]
 
 { #category : #accessing }
@@ -95,13 +86,10 @@ SoilQueueWorkerLimitTest >> setUp [
 		initializeRoot.
 	self inTransaction: [ :txn |
 		| workspace |
-		workspace := SoilQueueWorkspace
-			index: ((SoilIndexedDictionary newWithBackend: SoilSkipList)
-				keySize: 24;
-				maxLevel: 16;
-				yourself)
-			keySize: 24
-			lanes: { self laneNamed: #a prefix: 1. self laneNamed: #b prefix: 2 }.
+		workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1.
+		workspace
+			addLaneNamed: #a format: SoilQueueTimeOrderedKeyFormat new;
+			addLaneNamed: #b format: SoilQueueTimeOrderedKeyFormat new.
 		txn root at: #queue put: workspace.
 		txn makeRoot: workspace.
 		workspace initializeIn: txn ]
@@ -149,7 +137,7 @@ SoilQueueWorkerLimitTest >> testAKeyThatIsOutAsksForNoWorker [
 		yourself).
 	running := SoilQueueWorker on: queue lane: (queue lane: #a).
 	queue workerStarting: running.
-	self assert: (queue assignNextIn: (queue lane: #a)) notNil.
+	self assert: (queue assignNextIn: (queue lane: #a) preferring: nil) notNil.
 	queue runStep.
 
 	self assert: (self startedFor: #a in: queue) equals: 2

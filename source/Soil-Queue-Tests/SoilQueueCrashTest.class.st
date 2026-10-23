@@ -27,6 +27,18 @@ Class {
 }
 
 { #category : #helpers }
+SoilQueueCrashTest >> assignNextOf: aQueue in: aTransaction [
+	"what the first lane of aQueue hands out now, in aTransaction, with no key to carry on
+	from"
+
+	^ aQueue
+		assignNextIn: aQueue defaultLane
+		dueAt: DateAndTime now
+		preferring: nil
+		in: aTransaction
+]
+
+{ #category : #helpers }
 SoilQueueCrashTest >> crashAfterAnEffectOn: aKey [
 	"the hard case: the effect on the outside happened and the commit that would have noted
 	it never came. All that is left is the claim"
@@ -338,7 +350,7 @@ SoilQueueCrashTest >> testAnEntryHeldByALiveWorkerIsNotTakenAway [
 	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
 	queue := self queue.
 	txn := soil newTransaction.
-	queue assignNextDueAt: DateAndTime now in: txn.
+	self assignNextOf: queue in: txn.
 	txn abort.
 	queue claim: key.
 
@@ -371,7 +383,7 @@ SoilQueueCrashTest >> testAnEntryHeldByAWorkerOfTheRunBeforeIsNotTakenAwayAtASta
 	queue := self queue.
 	queue recoverOrphanedClaims.
 	txn := soil newTransaction.
-	queue assignNextDueAt: DateAndTime now in: txn.
+	self assignNextOf: queue in: txn.
 	txn abort.
 	queue claim: key.
 	txn := soil newTransaction.

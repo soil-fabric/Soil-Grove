@@ -21,6 +21,18 @@ Class {
 }
 
 { #category : #helpers }
+SoilQueueTest >> assignNextOf: aQueue in: aTransaction [
+	"what the first lane of aQueue hands out now, in aTransaction, with no key to carry on
+	from"
+
+	^ aQueue
+		assignNextIn: aQueue defaultLane
+		dueAt: DateAndTime now
+		preferring: nil
+		in: aTransaction
+]
+
+{ #category : #helpers }
 SoilQueueTest >> descriptionIn: aTransaction [
 
 	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
@@ -123,11 +135,11 @@ SoilQueueTest >> testATakenEntryComesBackAfterItIsReleased [
 	queue := self queue.
 
 	txn := soil newTransaction.
-	queue assignNextDueAt: DateAndTime now in: txn.
+	self assignNextOf: queue in: txn.
 	self assert: (queue isHolding: key).
 	queue release: key.
 	self deny: (queue isHolding: key).
-	again := queue assignNextDueAt: DateAndTime now in: txn.
+	again := self assignNextOf: queue in: txn.
 	txn abort.
 
 	self assert: again equals: key
@@ -191,7 +203,7 @@ SoilQueueTest >> testAnEntryGivenBackMeanwhileIsNotHandedOutFromAnOlderRead [
 	txn := soil newTransaction.
 	[ queue := SoilQueueTestInterleavingQueue onWorkspace: (self workspaceIn: txn) in: txn ]
 		ensure: [ txn abort ].
-	self assert: (queue assignNextIn: queue defaultLane) equals: held.
+	self assert: (queue assignNextIn: queue defaultLane preferring: nil) equals: held.
 
 	finished := Semaphore new.
 	queue interleave: [
@@ -203,7 +215,7 @@ SoilQueueTest >> testAnEntryGivenBackMeanwhileIsNotHandedOutFromAnOlderRead [
 		  finished signal ] fork.
 		(Delay forMilliseconds: 300) wait ].
 
-	self assert: (queue assignNextIn: queue defaultLane) equals: next.
+	self assert: (queue assignNextIn: queue defaultLane preferring: nil) equals: next.
 	finished waitTimeoutSeconds: 5.
 	self deny: (queue isHolding: held)
 ]
@@ -218,8 +230,8 @@ SoilQueueTest >> testAnEntryIsHandedOutOnlyOnce [
 	queue := self queue.
 
 	txn := soil newTransaction.
-	first := queue assignNextDueAt: DateAndTime now in: txn.
-	second := queue assignNextDueAt: DateAndTime now in: txn.
+	first := self assignNextOf: queue in: txn.
+	second := self assignNextOf: queue in: txn.
 	txn abort.
 
 	self assert: first notNil.
@@ -284,8 +296,8 @@ SoilQueueTest >> testTwoQueuesOnOneDescriptionDoNotKnowOfEachOther [
 	self deny: one == other.
 
 	txn := soil newTransaction.
-	first := one assignNextDueAt: DateAndTime now in: txn.
-	second := other assignNextDueAt: DateAndTime now in: txn.
+	first := self assignNextOf: one in: txn.
+	second := self assignNextOf: other in: txn.
 	txn abort.
 
 	self assert: first equals: second

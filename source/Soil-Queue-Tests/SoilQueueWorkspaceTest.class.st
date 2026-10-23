@@ -31,6 +31,17 @@ SoilQueueWorkspaceTest >> descriptionIn: aTransaction [
 ]
 
 { #category : #helpers }
+SoilQueueWorkspaceTest >> next: aWorkspace dueAt: aDateAndTime ifNone: aBlock [
+	"the next due key of the first lane, with nothing out"
+
+	^ aWorkspace
+		nextDueAt: aDateAndTime
+		in: aWorkspace defaultLane
+		skipping: #(  )
+		ifNone: aBlock
+]
+
+{ #category : #helpers }
 SoilQueueWorkspaceTest >> workspaceIn: aTransaction [
 	"where the entries are: the workspace the description holds"
 
@@ -102,10 +113,7 @@ SoilQueueWorkspaceTest >> testAClaimedEntryIsPassedByWhenWorkIsSelected [
 
 	txn := soil newTransaction.
 	self
-		assert: ((self workspaceIn: txn)
-			nextDueAt: DateAndTime now + 1 minute
-			skipping: #(  )
-			ifNone: [ nil ])
+		assert: (self next: (self workspaceIn: txn) dueAt: DateAndTime now + 1 minute ifNone: [ nil ])
 		equals: next.
 	txn abort
 ]
@@ -135,10 +143,7 @@ SoilQueueWorkspaceTest >> testAnEmptyQueueHasNoNextTimeToOfferEither [
 	self addQueue.
 	txn := soil newTransaction.
 	self
-		assert: ((self workspaceIn: txn)
-			nextDueAt: DateAndTime now
-			skipping: #(  )
-			ifNone: [ :time | time ])
+		assert: (self next: (self workspaceIn: txn) dueAt: DateAndTime now ifNone: [ :time | time ])
 		equals: nil.
 	txn abort
 ]
@@ -174,10 +179,7 @@ SoilQueueWorkspaceTest >> testEntriesComeOutOldestDueFirst [
 
 	txn := soil newTransaction.
 	self
-		assert: ((self workspaceIn: txn)
-			nextDueAt: DateAndTime now + 1 minute
-			skipping: #(  )
-			ifNone: [ nil ])
+		assert: (self next: (self workspaceIn: txn) dueAt: DateAndTime now + 1 minute ifNone: [ nil ])
 		equals: early.
 	txn abort
 ]
@@ -193,10 +195,7 @@ SoilQueueWorkspaceTest >> testNothingDueAnswersWhenTheNextOneIs [
 
 	txn := soil newTransaction.
 	self
-		assert: ((self workspaceIn: txn)
-			nextDueAt: DateAndTime now
-			skipping: #(  )
-			ifNone: [ :time | time ])
+		assert: (self next: (self workspaceIn: txn) dueAt: DateAndTime now ifNone: [ :time | time ])
 		equals: due.
 	txn abort
 ]
@@ -215,10 +214,7 @@ SoilQueueWorkspaceTest >> testTakingAnEntryOutLeavesTheNextOne [
 
 	txn := soil newTransaction.
 	self
-		assert: ((self workspaceIn: txn)
-			nextDueAt: DateAndTime now + 1 minute
-			skipping: #(  )
-			ifNone: [ nil ])
+		assert: (self next: (self workspaceIn: txn) dueAt: DateAndTime now + 1 minute ifNone: [ nil ])
 		equals: second.
 	txn abort
 ]
