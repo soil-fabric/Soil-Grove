@@ -460,8 +460,13 @@ SoilQueue >> recover: aKey [
 	An entry that is given back waits first, by the curve of its lane: what took its worker
 	away -- a commit that does not go through, a segment that is not
 	there yet -- is often gone after a short while, and without the wait the budget would be
-	used up in milliseconds. The key moves with the time, in the same commit."
+	used up in milliseconds. The key moves with the time, in the same commit.
 
+	A parked entry is said, in a line of its own once the commit has gone through: a dead
+	letter is for somebody to look at, and nobody is woken for it. The line is made while
+	the transaction is open, because the entry is read in it"
+
+	| parked |
 	self withTransactionDo: [ :txn |
 		| workspace entry lane |
 		workspace := self workspaceIn: txn.
@@ -475,8 +480,13 @@ SoilQueue >> recover: aKey [
 				entry releaseClaim.
 				entry readyAt: self now + (lane retryDelayAfter: entry orphanedRetries).
 				workspace moveKey: aKey for: entry ]
-			ifFalse: [ workspace deadLetter: aKey ].
-		txn commit ]
+			ifFalse: [
+				workspace deadLetter: aKey.
+				parked := 'parked an entry of lane ' , lane name printString
+					, ' that lost its worker ' , (self count: entry orphanedRetries + 1 of: 'time')
+					, ' in a row: ' , entry printString ].
+		txn commit ].
+	parked ifNotNil: [ :line | self emit: line ]
 ]
 
 { #category : #recovery }

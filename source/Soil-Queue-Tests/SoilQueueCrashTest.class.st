@@ -293,6 +293,25 @@ SoilQueueCrashTest >> testAContinuingEntryPicksUpWhereItStopped [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testAnEntryThatIsParkedIsSaid [
+	"a dead letter is for somebody to look at, and nobody is woken for it. Given back, an
+	entry says nothing"
+
+	| key |
+	self orphanedRetryLimit: 1.
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self crashBeforeTheNextStepOn: key.
+	self queue recoverOrphanedClaims.
+	self assert: (soil reportedMatching: 'parked') isEmpty.
+
+	self crashBeforeTheNextStepOn: key.
+	self queue recoverOrphanedClaims.
+	self assert: (soil reportedMatching: 'parked') size equals: 1.
+	self assert: ((soil reportedMatching: 'parked') first includesSubstring: 'SoilQueueTestRepeatingEntry').
+	self assert: ((soil reportedMatching: 'parked') first includesSubstring: 'lost its worker 2 times in a row')
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testAnEntryThatKeepsLosingItsWorkerIsParked [
 	"what takes its worker with it every time -- the poison entry -- stops coming back once
 	the limit is used up. It is parked, not released: releasing it would hand the next
