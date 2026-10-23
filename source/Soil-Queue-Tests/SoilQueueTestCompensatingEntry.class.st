@@ -27,6 +27,6 @@ SoilQueueTestCompensatingEntry >> resumeAfterAbortIn: aTransaction [
 	"compensating: the aborted attempt may have left its effect on my target, and that goes
 	before I run again"
 
-	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self expecting: #claimed ].
+	self isClaimed ifFalse: [ ^ SoilQueueWrongEntryState signalFor: self ].
 	self target undoLastEffect
 ]

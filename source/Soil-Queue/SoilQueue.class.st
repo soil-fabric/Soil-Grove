@@ -242,7 +242,7 @@ SoilQueue >> basicIsIdle [
 SoilQueue >> book: anError for: aKey [
 	"the work unit of an entry failed at its work, and its transaction is gone. What is left
 	to do is mine, in a transaction of my own: the entry gets to say so to its target
-	(#giveUp:in:), and is done.
+	(#giveUp:in:), and leaves the ordering -- which is all that done is.
 
 	A failure at the work is a result. It is not tried again and not parked: a retry a far
 	side would want is the entry's own business, a due time it sets itself, and a dead
@@ -258,7 +258,6 @@ SoilQueue >> book: anError for: aKey [
 		entry := workspace entryAt: aKey.
 		entry giveUp: anError in: txn.
 		workspace removeKey: aKey.
-		entry markDone.
 		txn commit ]
 ]
 
@@ -791,7 +790,8 @@ SoilQueue >> workOnce: aKey [
 	"one attempt at the work unit, and what follows from what it answers, in one commit.
 
 	#more gives the claim back, and the entry stays in the ordering under the key its due
-	time now asks for. A work unit that says 'again, but later' has moved its #readyAt,
+	time now asks for. Anything else is the end of the entry: it leaves the ordering, and
+	nothing is written on it on the way out. A work unit that says 'again, but later' has moved its #readyAt,
 	and the key is what sorts by it -- left where it was, the entry would be handed out
 	again at once. The move goes with the result into the same commit, and it never reads
 	the target: only the reference travels. An entry that did not move its due time keeps
@@ -821,9 +821,7 @@ SoilQueue >> workOnce: aKey [
 			ifTrue: [
 				entry releaseClaim.
 				workspace moveKey: aKey for: entry ]
-			ifFalse: [
-				workspace removeKey: aKey.
-				entry markDone ].
+			ifFalse: [ workspace removeKey: aKey ].
 		txn commit ].
 	^ nil
 ]

@@ -151,24 +151,11 @@ SoilQueueEntryTest >> testCompensationIsTheSubclassesToImplement [
 ]
 
 { #category : #tests }
-SoilQueueEntryTest >> testDeadLetteringDropsTheClaim [
-	"dead lettering parks an entry visibly instead of deleting it, and it is no longer
-	held by anyone"
-
-	| entry |
-	entry := SoilQueueTestEntry on: 'work'.
-	entry claimAt: DateAndTime now.
-	entry markDeadLetter.
-	self assert: entry isDeadLetter.
-	self assert: entry claimedAt isNil
-]
-
-{ #category : #tests }
-SoilQueueEntryTest >> testFinishingAnUnclaimedEntryIsRefused [
-	"work that nobody took cannot be finished"
+SoilQueueEntryTest >> testGivingBackAnUnclaimedEntryIsRefused [
+	"somebody believes they held what nobody took. Doing nothing quietly would hide it"
 
 	self
-		should: [ (SoilQueueTestEntry on: 'work') markDone ]
+		should: [ (SoilQueueTestEntry on: 'work') releaseClaim ]
 		raise: SoilQueueWrongEntryState
 ]
 
@@ -180,6 +167,20 @@ SoilQueueEntryTest >> testTheAbstractEntryHasNoAnswerAfterAnAbort [
 	self
 		should: [ SoilQueueEntry new resumeAfterAbortIn: nil ]
 		raise: SubclassResponsibility
+]
+
+{ #category : #tests }
+SoilQueueEntryTest >> testTheStateIsReadOffTheClaim [
+	"one field, two states: claimed while the time of the claim is there, pending while it
+	is not"
+
+	| entry |
+	entry := SoilQueueTestEntry on: 'work'.
+	self assert: entry state equals: #pending.
+	entry claimAt: DateAndTime now.
+	self assert: entry state equals: #claimed.
+	entry releaseClaim.
+	self assert: entry state equals: #pending
 ]
 
 { #category : #tests }

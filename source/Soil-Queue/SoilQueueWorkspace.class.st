@@ -148,11 +148,13 @@ SoilQueueWorkspace >> deadLetter: aKey [
 	"park an entry that could not be worked on at all, and take it out of the ordering.
 
 	Put first and removed second, so that an abort in between leaves it where it was rather
-	than nowhere. It keeps its key: it is the same entry, only somewhere else."
+	than nowhere. It keeps its key: it is the same entry, only somewhere else. It keeps its
+	claim too. Being here is what says it is parked, and the claim says when its last
+	attempt began; nobody hands out what lies here. Should one ever be taken back into the
+	ordering, its claim is given back first (#releaseClaim)."
 
 	| entry |
 	entry := self entryAt: aKey.
-	entry markDeadLetter.
 	deadLetters at: aKey put: entry.
 	self removeKey: aKey.
 	^ entry
