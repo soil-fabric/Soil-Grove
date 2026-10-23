@@ -11,15 +11,15 @@ Class {
 	#category : #'Soil-Queue-Tests'
 }
 
-{ #category : #accessing }
-SoilQueueTestRepeatingEntry class >> resumption [
-
-	^ #repeating
-]
-
 { #category : #working }
 SoilQueueTestRepeatingEntry >> performIn: aTransaction [
 
 	self target addEffect: #ran.
 	^ #finished
+]
+
+{ #category : #working }
+SoilQueueTestRepeatingEntry >> resumeAfterAbortIn: aTransaction [
+	"repeating: I run again from the start, and my target counts how often. Nothing to put
+	right -- the second effect is what a test of me is there to see"
 ]

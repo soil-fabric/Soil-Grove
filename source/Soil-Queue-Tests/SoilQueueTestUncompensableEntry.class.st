@@ -9,7 +9,7 @@ Class {
 }
 
 { #category : #working }
-SoilQueueTestUncompensableEntry >> compensateIn: aTransaction [
+SoilQueueTestUncompensableEntry >> resumeAfterAbortIn: aTransaction [
 
 	self error: 'the cleanup cannot be done'
 ]

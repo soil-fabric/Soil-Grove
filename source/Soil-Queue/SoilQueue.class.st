@@ -461,18 +461,21 @@ SoilQueue >> prepareIn: aTransaction [
 
 { #category : #recovery }
 SoilQueue >> recover: aKey [
-	"give one orphaned entry back, the way its own semantics say.
+	"give one orphaned entry back, after it has said what holds now.
 
-	Its own transaction, so that one entry whose compensation throws does not keep the
-	others from coming back. A compensating entry that throws here stays claimed and is
-	tried again at the next start, which is the right answer while the cleanup step has no
-	dead-lettering of its own.
+	The entry is asked first, every time and whatever comes after: its #resumeAfterAbortIn:
+	runs before it is given back and before it is parked, in the same transaction, so that
+	what the aborted attempt left behind is put right before another worker sees the entry
+	-- and is not left lying under a dead letter either. What it does there is its own
+	business, and there is no answer of mine to fall back on.
+
+	Its own transaction, so that one entry whose answer throws does not keep the others
+	from coming back. An entry that throws here stays claimed and is tried again at the
+	next start, which is the right answer while the hook has no dead-lettering of its own.
 
 	This is the one moment the queue learns that a worker went away, so it is where that is
 	counted. An entry that has lost its worker as often in a row as its lane allows is not
 	given back but parked: whatever took the worker with it would take the next one too.
-	Compensated first all the same, so that what it left behind is not left lying under a
-	dead letter.
 
 	An entry that is given back waits first, by the curve of its lane: what took its worker
 	away -- a commit that does not go through, a segment that is not
@@ -484,7 +487,7 @@ SoilQueue >> recover: aKey [
 		workspace := self workspaceIn: txn.
 		entry := workspace entryAt: aKey.
 		entry isClaimed ifFalse: [ ^ self ].
-		entry resumption == #compensating ifTrue: [ entry compensateIn: txn ].
+		entry resumeAfterAbortIn: txn.
 		lane := self laneFor: aKey in: workspace.
 		(lane allowsOrphanedRetryOf: entry)
 			ifTrue: [
@@ -504,8 +507,9 @@ SoilQueue >> recoverOrphanedClaims [
 	Found over the entries and not over the index, because a claim does not change a key --
 	the ordering cannot tell the two apart. What happens then is the entry's business and
 	not mine: a continuing one keeps its progress, a repeating one starts over on its
-	promise of idempotence, a compensating one is cleaned up first. That is the whole
-	reason the semantics sit on the entry rather than in the queue.
+	promise of idempotence, a compensating one is cleaned up first, and each says which in
+	#resumeAfterAbortIn:. That is the whole reason the answer sits on the entry rather than
+	in the queue.
 
 	Once per start, not once per instance: #prepareIn: asks again, because a restart runs
 	on the same instance. Within a start everything claimed after this is claimed by a
@@ -670,7 +674,7 @@ SoilQueue >> stepFailed: anError on: aKey [
 	the commit, a conflict that did not resolve, a record that could not be read, the
 	bookkeeping itself. The entry still says claimed and
 	no worker holds it any more, which is exactly what a lost worker leaves behind, so it goes
-	back the same way: #recover: counts it, compensates a compensating one first, waits, and
+	back the same way: #recover: asks it what holds after the abort, counts it, waits, and
 	parks it when the lane allows no more.
 
 	Counted as a failed step first. If giving the entry back fails as well, that is counted

@@ -47,17 +47,16 @@ SoilQueueTestUnreachableEntry class >> resetAttempts [
 	Attempts := 0
 ]
 
-{ #category : #accessing }
-SoilQueueTestUnreachableEntry class >> resumption [
-
-	^ #repeating
-]
-
 { #category : #working }
 SoilQueueTestUnreachableEntry >> performIn: aTransaction [
 
 	Attempts := self class attempts + 1.
 	^ (errorClass ifNil: [ SoilError ]) signal: 'the record of the target cannot be read'
+]
+
+{ #category : #working }
+SoilQueueTestUnreachableEntry >> resumeAfterAbortIn: aTransaction [
+	"repeating: I never get as far as doing anything. Nothing to put right"
 ]
 
 { #category : #initialization }

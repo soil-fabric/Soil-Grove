@@ -38,12 +38,6 @@ SoilQueueTestConflictingEntry class >> conflictsToRaise: anInteger [
 	ConflictsToRaise := anInteger
 ]
 
-{ #category : #accessing }
-SoilQueueTestConflictingEntry class >> resumption [
-
-	^ #repeating
-]
-
 { #category : #working }
 SoilQueueTestConflictingEntry >> performIn: aTransaction [
 
@@ -53,4 +47,10 @@ SoilQueueTestConflictingEntry >> performIn: aTransaction [
 		ConflictsToRaise := ConflictsToRaise - 1.
 		SoilObjectHasConcurrentChange new signal ].
 	^ #finished
+]
+
+{ #category : #working }
+SoilQueueTestConflictingEntry >> resumeAfterAbortIn: aTransaction [
+	"repeating: what I do to my target lies in the transaction of the attempt, and an
+	abort takes it along. Nothing to put right"
 ]
