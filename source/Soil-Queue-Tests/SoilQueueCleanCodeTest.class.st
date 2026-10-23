@@ -56,8 +56,8 @@ SoilQueueCleanCodeTest >> testEveryEntryThatCanWorkSaysWhatHoldsAfterAnAbort [
 
 { #category : #tests }
 SoilQueueCleanCodeTest >> testTheQueueKeepsTheTransientsItInherits [
-	"a declaration of mine replaces the inherited one rather than adding to it, so a queue
-	that forgot them would write its supervisor and its process along"
+	"the queue's declaration replaces the inherited one rather than adding to it, so a
+	queue that forgot them would write its supervisor and its process along"
 
 	self assert: (SoilQueue soilTransientInstVars includesAll: SoilActiveResident soilTransientInstVars)
 ]

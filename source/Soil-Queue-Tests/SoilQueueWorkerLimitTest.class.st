@@ -2,9 +2,9 @@
 How many workers run at once, lane by lane: every lane has a worker limit, a count of
 places of its own, and lanes share none.
 
-On a workspace with two lanes, #a and #b, and a queue made on it without a resident, so
-that the limits come from a description handed to it. The workers are not forked, and
-counted as started.
+On a workspace with two lanes, #a and #b, besides an empty #default, and a queue made on
+it without a resident, so that the limits come from a description handed to it. The
+workers are not forked, and counted as started.
 "
 Class {
 	#name : #SoilQueueWorkerLimitTest,
