@@ -3,8 +3,11 @@ The stored half of a lane: its name, the section of the index its entries lie in
 the format that orders them. What shapes a key, and nothing else.
 
 I live in the workspace, because whoever opens the queue without a description still
-has to find the entries of each lane. How fast a lane runs is configuration and belongs
-to the live lane, SoilQueueLane, which the queue builds from me when it starts.
+has to find the entries of each lane. How a lane runs -- the limit for entries given
+back, the backoff, the worker limit -- is configuration and belongs to the live lane,
+SoilQueueLane, which the queue builds from me and a description: with a resident at every
+start, without one where the queue is created on its workspace and when it is configured
+again.
 
 Several lanes share one index. My section is what keeps their entries apart: every key
 of mine carries my marker in front, and a scan of mine stops where my section ends.

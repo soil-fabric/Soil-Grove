@@ -57,9 +57,10 @@ SoilQueueDescription class >> timeOrderedWithBackend: anIndexClass keySize: keyS
 
 { #category : #retrying }
 SoilQueueDescription >> backoffBase [
-	"the pause before the first retry. Every further failure in a row doubles it, up to
-	#backoffCap. One second by default, so that a short disturbance -- a dropped
-	connection -- is over quickly"
+	"the pause before an entry that was given back comes again the first time. Every further
+	time in a row doubles it, up to #backoffCap. One second by default, so that a short
+	disturbance around the work -- a commit that did not go through, a segment that is not
+	there yet -- is over quickly"
 
 	^ backoffBase ifNil: [ 1 second ]
 ]
@@ -79,8 +80,8 @@ SoilQueueDescription >> backoffBase: aDuration forLane: aSymbol [
 
 { #category : #retrying }
 SoilQueueDescription >> backoffCap [
-	"the longest pause between two retries, however often the work has failed. An hour by
-	default"
+	"the longest pause before an entry that was given back comes again, however often in a
+	row that happened. An hour by default"
 
 	^ backoffCap ifNil: [ 1 hour ]
 ]

@@ -1,12 +1,12 @@
 "
-I turn an entry into the part of its key that says how the queue is ordered. That part
-alone, not the whole key: the marker in front of it belongs to the section the queue
-lies in, and whatever the embedder wants to add comes after me. No single participant
-knows the whole key -- the queue passes the build along and each adds its own piece.
+I turn an entry into the part of its key that says how its lane is ordered. That part
+alone, not the whole key: the marker in front of it belongs to the lane's section, and
+behind me there is only padding. No single participant knows the whole key -- the lane
+description puts my part into its section (SoilQueueLaneDescription>>#keyFor:in:).
 
 Which is why the entry hands over values and not a key. If a subclass of the entry
 answered its own sort key, key building would sit in the seam that is meant to carry
-domain matters only, and two entries of one queue could end up sorting differently.
+domain matters only, and two entries of one lane could end up sorting differently.
 
 Everything I write is fixed length and big endian, so that byte order and numeric order
 agree -- an index compares keys as numbers.
@@ -86,14 +86,15 @@ SoilQueueKeyFormat >> nextDueIn: aLaneDescription of: aQueueWorkspace at: aDateA
 	"the key of the oldest entry of a lane that is due, skipping the keys that are already
 	out. The two keys are for a format that hands out by group; I ignore them. When nothing
 	is due, aBlock is evaluated with the time the next entry becomes due, or with nil when
-	there is nothing at all -- so a caller can sleep exactly as long as it has to rather
-	than come back and ask again.
+	no pending entry is left that is not out -- so a caller can sleep exactly as long as it
+	has to rather than come back and ask again.
 
 	Only pending entries are handed out. An entry that says claimed belongs to a worker, or
 	to the recovery pass if no worker holds it -- and it stays in the ordering either way,
-	because a claim does not change a key. Without this a work unit that throws would be
-	handed straight back to the next worker, for ever. A key that is out is passed without
-	its entry being read"
+	because a claim does not change a key. Without this a claimed entry nobody holds would
+	be handed out, refused by its own claim, and sent back through SoilQueue>>#stepFailed:on:
+	-- a step error and a count for nothing; one whose giving back keeps failing would come
+	round for ever. A key that is out is passed without its entry being read"
 
 	| range |
 	range := aLaneDescription range.

@@ -14,7 +14,8 @@ is the one place they are set and checked.
 What I decide: whether an entry that was given back may come back once more, and how long
 it waits before it does.
 
-My values are only read once the queue runs, so asking me needs no lock. The one thing
+My values are set when I am built and never after -- a new configuration builds new
+lanes -- so asking me needs no lock. The one thing
 of mine that changes, the key handed out last, is read and written under the queue's
 mutex, where competing workers meet. I am never stored.
 "
@@ -79,8 +80,9 @@ SoilQueueLane >> configureFrom: aDescription [
 { #category : #accessing }
 SoilQueueLane >> lastIssuedKey [
 	"the key handed out last, nil before the first. A grouped lane takes its groups in turn
-	from behind this one, so that low group ids do not always win. Kept in memory only: after
-	a start the turn begins at the front again, which costs nothing but one round"
+	from behind this one, so that low group ids do not always win. Kept in memory only: when
+	my queue builds its lanes anew -- at a start with a resident, at #configureFrom:in:
+	without one -- the turn begins at the front again, which costs nothing but one round"
 
 	^ lastIssuedKey
 ]
@@ -112,8 +114,8 @@ SoilQueueLane >> printOn: aStream [
 
 { #category : #retrying }
 SoilQueueLane >> retryDelayAfter: anInteger [
-	"the pause before retry number anInteger: the base, doubled for every failure before
-	it, never longer than the cap"
+	"the pause before an entry that was given back anInteger times in a row comes again: the
+	base, doubled for every time before, never longer than the cap"
 
 	^ (backoffBase * (2 raisedTo: anInteger - 1)) min: backoffCap
 ]

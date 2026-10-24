@@ -8,8 +8,9 @@ The dispatcher then sleeps until then, or until something happens first: new wor
 stop, a worker that ended.
 
 Time is the queue's clock here, not the wall clock, so 'an hour later' costs nothing and
-says exactly what it says. Everything is driven straight through except the two tests
-about the sleeping dispatcher, which fork because the sleep is what they are about.
+says exactly what it says. Everything is driven straight through except three tests that
+start the queue and so fork: the two about the sleeping dispatcher, because the sleep is
+what they are about, and the one about the first step of a start.
 "
 Class {
 	#name : #SoilQueueWakeTest,
@@ -49,7 +50,7 @@ SoilQueueWakeTest >> keys [
 
 { #category : #accessing }
 SoilQueueWakeTest >> path [
-	"a database of its own, because two tests here fork"
+	"a database of its own, because three tests here fork"
 
 	^ 'soil-queue-wake-tests'
 ]

@@ -2,9 +2,10 @@
 The live half: the part a database object cannot do.
 
 It remembers which entries are out, so the same one is not handed to two workers -- and
-that only holds because there is one of it, which is exactly why it is not stored. The
-first test here is the one that fails without that: two queues built on the same
-description each keep their own set, and hand out the same entry twice.
+that only holds because there is one of it, which is exactly why it is not stored.
+#testAnEntryIsHandedOutOnlyOnce holds that up, and
+#testTwoQueuesOnOneDescriptionDoNotKnowOfEachOther shows what two of it do: each keeps
+its own set, and both hand out the same entry.
 
 The rest is a work unit and its transaction boundaries. Select, claim, work: three
 transactions, so that a crash between them leaves an entry that says claimed with nobody
