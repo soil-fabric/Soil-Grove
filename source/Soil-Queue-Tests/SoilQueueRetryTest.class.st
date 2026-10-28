@@ -121,6 +121,22 @@ SoilQueueRetryTest >> queue [
 		ensure: [ txn abort ]
 ]
 
+{ #category : #helpers }
+SoilQueueRetryTest >> runOnceWithin: aNumberOfSeconds on: aQueue [
+	"one entry for a worker of aQueue, in a process of its own, for at most aNumberOfSeconds.
+	Answers whether the worker was done by then. A worker that waits for a lock its own
+	process holds would wait for ever, and the test with it"
+
+	| done process |
+	done := Semaphore new.
+	process := [
+		(SoilQueueWorker on: aQueue) runOnce.
+		done signal ] fork.
+	(done waitTimeoutSeconds: aNumberOfSeconds) ifFalse: [ ^ true ].
+	process terminate.
+	^ false
+]
+
 { #category : #running }
 SoilQueueRetryTest >> setUp [
 
@@ -417,6 +433,41 @@ SoilQueueRetryTest >> testAWorkUnitThatRunsAgainAfterAConflictIsSaid [
 	lines := soil reportedMatching: 'concurrent change'.
 	self assert: lines size equals: 1.
 	self assert: (lines first includesSubstring: 'running it again (attempt 2 of 3)')
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAStepWhoseCommitKeepsMeetingAConflictIsGivenBackOnceTheCommitHasLetGo [
+	"a write conflict arises inside the commit, which holds the lock of the database while it
+	checks. The third in a row gets out of the work unit, and the entry is given back, which
+	is a commit too. Given back while the error was being handled -- on top of the commit
+	that met it, which still held the lock -- it waited for that lock in the same process, for
+	ever, and every commit of the database waited with it. Each attempt was raced, and only
+	the other transaction's writes are left"
+
+	| queue |
+	self put: [ :target | SoilQueueTestRacedEntry on: target ].
+	queue := self queue.
+	self assert: (self runOnceWithin: 10 on: queue).
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 1 }.
+	self assert: queue stepErrorCount equals: 1.
+	self assert: self targetEffects equals: #( #meanwhile #meanwhile #meanwhile )
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAGivingUpWhoseCommitMeetsAConflictIsGivenBackOnceTheCommitHasLetGo [
+	"a work unit that failed at its work is booked in a transaction of its own, outside the
+	run-again of a conflict, so a conflict in that commit gets out of the step. The entry is
+	given back -- after the commit has let go of the lock of the database, or the giving back
+	waits for it for ever"
+
+	self put: [ :target | SoilQueueTestRacedGivingUpEntry on: target ].
+	self assert: (self runOnceWithin: 10 on: self queue).
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 1 }.
+	self assert: self targetEffects equals: #( #meanwhile )
 ]
 
 { #category : #helpers }
