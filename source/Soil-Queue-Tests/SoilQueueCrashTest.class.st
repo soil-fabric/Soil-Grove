@@ -330,7 +330,7 @@ SoilQueueCrashTest >> testAnEntryThatIsParkedIsSaid [
 	self queue recoverOrphanedClaims.
 	self assert: (soil reportedMatching: 'parked') size equals: 1.
 	self assert: ((soil reportedMatching: 'parked') first includesSubstring: 'SoilQueueTestRepeatingEntry').
-	self assert: ((soil reportedMatching: 'parked') first includesSubstring: 'lost its worker 2 times in a row')
+	self assert: ((soil reportedMatching: 'parked') first includesSubstring: 'did not finish its step 2 times in a row')
 ]
 
 { #category : #tests }

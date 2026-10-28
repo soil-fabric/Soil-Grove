@@ -456,12 +456,16 @@ SoilQueue >> printStringOf: anEntry [
 	"what a line says about anEntry. An entry prints what it works on, and a target that
 	cannot be read is often the very reason the entry is in such a line -- the record
 	behind it is not there yet, or not any more. A line must not take the bookkeeping it
-	tells of down with it, so it says that it could not print the entry instead"
+	tells of down with it, so it says that it could not print the entry instead.
+
+	By the class of the entry and not of its proxy, which is what the workspace answers: the
+	callers have sent it the messages of an entry before, so it is read already"
 
 	^ [ anEntry printString ]
 		on: Error
 		do: [ :anError |
-			anEntry class name , ' that cannot be printed (' , anError messageText asString , ')' ]
+			([ anEntry theNonSoilProxy class name ] on: Error do: [ :another | 'an entry' ])
+				, ' that cannot be printed (' , anError messageText asString , ')' ]
 ]
 
 { #category : #recovery }
@@ -492,7 +496,9 @@ SoilQueue >> recover: aKey [
 	Either way it is said, in a line of its own once the commit has gone through: a dead
 	letter is for somebody to look at, and nobody is woken for it, and an entry that keeps
 	coming back after a wait is otherwise seen only once it is parked. The line is made
-	while the transaction is open, because the entry is read in it"
+	while the transaction is open, because the entry is read in it. It says that the entry
+	did not finish its step, which holds for both ways here: its worker went away, or the
+	step failed around its work unit (#stepFailed:on:)"
 
 	| said |
 	self withTransactionDo: [ :txn |
@@ -510,13 +516,13 @@ SoilQueue >> recover: aKey [
 				entry readyAt: self now + delay.
 				workspace moveKey: aKey for: entry.
 				said := 'gave back an entry of lane ' , lane name printString
-					, ' that lost its worker ' , (self count: entry orphanedRetries of: 'time')
+					, ' that did not finish its step ' , (self count: entry orphanedRetries of: 'time')
 					, ' in a row, due again in ' , (self durationString: delay)
 					, ': ' , (self printStringOf: entry) ]
 			ifFalse: [
 				workspace deadLetter: aKey.
 				said := 'parked an entry of lane ' , lane name printString
-					, ' that lost its worker ' , (self count: entry orphanedRetries + 1 of: 'time')
+					, ' that did not finish its step ' , (self count: entry orphanedRetries + 1 of: 'time')
 					, ' in a row: ' , (self printStringOf: entry) ].
 		txn commit ].
 	said ifNotNil: [ :line | self emit: line ]
@@ -740,9 +746,11 @@ SoilQueue >> work: aKey [
 	entry goes back the way an orphan goes back.
 
 	A run again is said: whatever the work unit says about itself, it said once for each
-	attempt, and only one of them counted"
+	attempt, and only one of them counted. Said after the handler is done and not in it: a
+	handler runs on top of the commit that met the conflict, which still holds the lock of
+	the database, and every commit of it would wait for the line"
 
-	| attempts failure |
+	| attempts failure conflict |
 	attempts := 0.
 	[ attempts := attempts + 1.
 	  [ failure := self workOnce: aKey.
@@ -750,11 +758,11 @@ SoilQueue >> work: aKey [
 		on: SoilObjectHasConcurrentChange
 		do: [ :aConflict |
 			attempts >= self conflictLimit ifTrue: [ aConflict pass ].
-			self emit: 'a concurrent change got in the way of a work unit, running it again (attempt '
-				, (attempts + 1) printString , ' of ' , self conflictLimit printString , '): '
-				, aConflict messageText asString.
+			conflict := aConflict messageText asString.
 			false ] ]
-		whileFalse.
+		whileFalse: [
+			self emit: 'a concurrent change got in the way of a work unit, running it again (attempt '
+				, (attempts + 1) printString , ' of ' , self conflictLimit printString , '): ' , conflict ].
 	failure ifNotNil: [ self book: failure for: aKey ]
 ]
 

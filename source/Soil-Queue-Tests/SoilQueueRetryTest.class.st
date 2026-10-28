@@ -398,7 +398,7 @@ SoilQueueRetryTest >> testAnEntryThatIsGivenBackIsSaid [
 
 	lines := soil reportedMatching: 'gave back'.
 	self assert: lines size equals: 1.
-	self assert: (lines first includesSubstring: 'that lost its worker 1 time in a row, due again in').
+	self assert: (lines first includesSubstring: 'that did not finish its step 1 time in a row, due again in').
 	self assert: (lines first includesSubstring: 'SoilQueueTestContinuingEntry')
 ]
 
