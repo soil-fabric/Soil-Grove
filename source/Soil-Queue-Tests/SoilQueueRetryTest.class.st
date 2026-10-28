@@ -125,7 +125,8 @@ SoilQueueRetryTest >> queue [
 SoilQueueRetryTest >> runOnceWithin: aNumberOfSeconds on: aQueue [
 	"one entry for a worker of aQueue, in a process of its own, for at most aNumberOfSeconds.
 	Answers whether the worker was done by then. A worker that waits for a lock its own
-	process holds would wait for ever, and the test with it"
+	process holds would wait for ever, and the test with it. Well under the time a test is
+	given, so that the test says why it failed"
 
 	| done process |
 	done := Semaphore new.
@@ -447,7 +448,9 @@ SoilQueueRetryTest >> testAStepWhoseCommitKeepsMeetingAConflictIsGivenBackOnceTh
 	| queue |
 	self put: [ :target | SoilQueueTestRacedEntry on: target ].
 	queue := self queue.
-	self assert: (self runOnceWithin: 10 on: queue).
+	self
+		assert: (self runOnceWithin: 5 on: queue)
+		description: 'the worker waits for a lock of its own'.
 	self
 		assert: self onlyEntry
 		equals: { #pending. clock now + 1 second. 1 }.
@@ -463,7 +466,9 @@ SoilQueueRetryTest >> testAGivingUpWhoseCommitMeetsAConflictIsGivenBackOnceTheCo
 	waits for it for ever"
 
 	self put: [ :target | SoilQueueTestRacedGivingUpEntry on: target ].
-	self assert: (self runOnceWithin: 10 on: self queue).
+	self
+		assert: (self runOnceWithin: 5 on: self queue)
+		description: 'the worker waits for a lock of its own'.
 	self
 		assert: self onlyEntry
 		equals: { #pending. clock now + 1 second. 1 }.
