@@ -94,17 +94,25 @@ SoilQueueWorker >> runOnce [
 	it does not cost me: a transient failure must not cost a worker. The queue counts it and
 	gives the entry back, see SoilQueue>>#stepFailed:on:.
 
+	Given to the queue once the step is left, not while the error is handled: a handler runs
+	on top of what signalled, and an error out of a commit -- a conflict, the commit of the
+	bookkeeping -- comes while that commit holds the lock of the database. Giving the entry
+	back commits as well, and in the handler it would wait for that lock in my own process,
+	for ever, and every commit of the database with it.
+
 	The key I worked on last goes with the question for the next one: on a grouped lane
 	that is how I carry on with my own chain."
 
-	| key |
+	| key failure |
 	key := queue assignNextIn: lane preferring: lastKey.
 	key ifNil: [ ^ nil ].
 	lastKey := key.
-	[ [ queue claim: key.
-	    queue work: key ]
+	[ failure := [ queue claim: key.
+	    queue work: key.
+	    nil ]
 		on: Error
-		do: [ :anError | queue stepFailed: anError on: key ] ]
+		do: [ :anError | anError ].
+	  failure ifNotNil: [ queue stepFailed: failure on: key ] ]
 		ensure: [ queue release: key ].
 	^ key
 ]
