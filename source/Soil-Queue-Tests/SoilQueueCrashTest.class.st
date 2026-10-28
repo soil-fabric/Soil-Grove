@@ -293,9 +293,31 @@ SoilQueueCrashTest >> testAContinuingEntryPicksUpWhereItStopped [
 ]
 
 { #category : #tests }
+SoilQueueCrashTest >> testAStartWithoutOrphansSaysNothingAboutThem [
+	"the count is said when there is something to count"
+
+	self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self queue recoverOrphanedClaims.
+	self assert: (soil reportedMatching: 'nobody holds') isEmpty
+]
+
+{ #category : #tests }
+SoilQueueCrashTest >> testTheOrphansAStartFindsAreCounted [
+	"each orphan is said as it goes back. The count before them says that these lines are
+	what the run before left behind, and not steps that failed just now"
+
+	| key |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self crashBeforeTheNextStepOn: key.
+	self queue recoverOrphanedClaims.
+	self assert: (soil reportedMatching: 'found 1 claim that nobody holds') size equals: 1.
+	self assert: (soil reportedMatching: 'gave back') size equals: 1
+]
+
+{ #category : #tests }
 SoilQueueCrashTest >> testAnEntryThatIsParkedIsSaid [
 	"a dead letter is for somebody to look at, and nobody is woken for it. Given back, an
-	entry says nothing"
+	entry is said as given back, and not as parked"
 
 	| key |
 	self orphanedRetryLimit: 1.

@@ -354,6 +354,71 @@ SoilQueueRetryTest >> testTheBackoffIsFromOneSecondUpToAnHourByDefault [
 	self assert: description backoffCap equals: 1 hour
 ]
 
+{ #category : #tests }
+SoilQueueRetryTest >> testAFailureAtTheWorkIsSaid [
+	"giving up is a result, and nobody is woken for it: the line is what is left of it to
+	read, with the error that was the reason"
+
+	| lines |
+	self put: [ :target | SoilQueueTestBrokenEntry on: target ].
+	(SoilQueueWorker on: self queue) runOnce.
+
+	lines := soil reportedMatching: 'gave up'.
+	self assert: lines size equals: 1.
+	self assert: (lines first includesSubstring: 'failed at its work (Error: the far side refused the request)').
+	self assert: (lines first includesSubstring: 'SoilQueueTestBrokenEntry')
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryThatCannotBePrintedIsGivenBackAllTheSame [
+	"a target that cannot be read is often why an entry is given back. The line says so
+	instead of the entry, and the entry goes back as it would without a line"
+
+	| lines |
+	self put: [ :target | SoilQueueTestUnprintableEntry on: target ].
+	self loseTheWorkerOn: self queue.
+
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 1 }.
+	lines := soil reportedMatching: 'gave back'.
+	self assert: lines size equals: 1.
+	self assert: (lines first includesSubstring: 'SoilQueueTestUnprintableEntry that cannot be printed')
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryThatIsGivenBackIsSaid [
+	"an entry that keeps coming back after a wait would otherwise be seen only once it is
+	parked, hours later. Each time it goes back is said, with how often in a row and how
+	long it waits"
+
+	| lines |
+	self put: [ :target | SoilQueueTestContinuingEntry on: target steps: 3 ].
+	self loseTheWorkerOn: self queue.
+
+	lines := soil reportedMatching: 'gave back'.
+	self assert: lines size equals: 1.
+	self assert: (lines first includesSubstring: 'that lost its worker 1 time in a row, due again in').
+	self assert: (lines first includesSubstring: 'SoilQueueTestContinuingEntry')
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAWorkUnitThatRunsAgainAfterAConflictIsSaid [
+	"what a work unit says about itself it says once for each attempt, and only the last one
+	counted. The line in between tells them apart"
+
+	| key queue lines |
+	SoilQueueTestConflictingEntry conflictsToRaise: 1.
+	key := self put: [ :target | SoilQueueTestConflictingEntry on: target ].
+	queue := self queue.
+	queue claim: key.
+	queue work: key.
+
+	lines := soil reportedMatching: 'concurrent change'.
+	self assert: lines size equals: 1.
+	self assert: (lines first includesSubstring: 'running it again (attempt 2 of 3)')
+]
+
 { #category : #helpers }
 SoilQueueRetryTest >> workspaceIn: aTransaction [
 	"where the entries are: the workspace the description holds"

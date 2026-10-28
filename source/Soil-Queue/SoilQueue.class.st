@@ -241,16 +241,22 @@ SoilQueue >> book: anError for: aKey [
 	letter is kept for an entry that keeps coming back -- see #recover:.
 
 	The error is kept for diagnosis. It is not counted as a step error: that count is what
-	shows a crash loop, and a failure that was handled is none"
+	shows a crash loop, and a failure that was handled is none. It is said, in a line once
+	the commit has gone through, like a parked entry (#recover:)"
 
+	| said |
 	lastStepError := anError.
 	self withTransactionDo: [ :txn |
 		| workspace entry |
 		workspace := self workspaceIn: txn.
 		entry := workspace entryAt: aKey.
 		entry giveUp: anError in: txn.
+		said := 'gave up an entry of lane ' , (self laneFor: aKey in: workspace) name printString
+			, ' that failed at its work (' , anError class name , ': ' , anError messageText asString
+			, '): ' , (self printStringOf: entry).
 		workspace removeKey: aKey.
-		txn commit ]
+		txn commit ].
+	said ifNotNil: [ :line | self emit: line ]
 ]
 
 { #category : #working }
@@ -445,6 +451,19 @@ SoilQueue >> prepareIn: aTransaction [
 	self noteWork
 ]
 
+{ #category : #logging }
+SoilQueue >> printStringOf: anEntry [
+	"what a line says about anEntry. An entry prints what it works on, and a target that
+	cannot be read is often the very reason the entry is in such a line -- the record
+	behind it is not there yet, or not any more. A line must not take the bookkeeping it
+	tells of down with it, so it says that it could not print the entry instead"
+
+	^ [ anEntry printString ]
+		on: Error
+		do: [ :anError |
+			anEntry class name , ' that cannot be printed (' , anError messageText asString , ')' ]
+]
+
 { #category : #recovery }
 SoilQueue >> recover: aKey [
 	"give one orphaned entry back, after it has said what holds now.
@@ -470,11 +489,12 @@ SoilQueue >> recover: aKey [
 	the same commit; on a grouped lane the entry keeps its key and holds up its group
 	(SoilQueueWorkspace>>#moveKey:for:).
 
-	A parked entry is said, in a line of its own once the commit has gone through: a dead
-	letter is for somebody to look at, and nobody is woken for it. The line is made while
-	the transaction is open, because the entry is read in it"
+	Either way it is said, in a line of its own once the commit has gone through: a dead
+	letter is for somebody to look at, and nobody is woken for it, and an entry that keeps
+	coming back after a wait is otherwise seen only once it is parked. The line is made
+	while the transaction is open, because the entry is read in it"
 
-	| parked |
+	| said |
 	self withTransactionDo: [ :txn |
 		| workspace entry lane |
 		workspace := self workspaceIn: txn.
@@ -483,18 +503,23 @@ SoilQueue >> recover: aKey [
 		entry resumeAfterAbortIn: txn.
 		lane := self laneFor: aKey in: workspace.
 		(lane allowsOrphanedRetryOf: entry)
-			ifTrue: [
+			ifTrue: [ | delay |
 				entry noteOrphaned.
 				entry releaseClaim.
-				entry readyAt: self now + (lane retryDelayAfter: entry orphanedRetries).
-				workspace moveKey: aKey for: entry ]
+				delay := lane retryDelayAfter: entry orphanedRetries.
+				entry readyAt: self now + delay.
+				workspace moveKey: aKey for: entry.
+				said := 'gave back an entry of lane ' , lane name printString
+					, ' that lost its worker ' , (self count: entry orphanedRetries of: 'time')
+					, ' in a row, due again in ' , (self durationString: delay)
+					, ': ' , (self printStringOf: entry) ]
 			ifFalse: [
 				workspace deadLetter: aKey.
-				parked := 'parked an entry of lane ' , lane name printString
+				said := 'parked an entry of lane ' , lane name printString
 					, ' that lost its worker ' , (self count: entry orphanedRetries + 1 of: 'time')
-					, ' in a row: ' , entry printString ].
+					, ' in a row: ' , (self printStringOf: entry) ].
 		txn commit ].
-	parked ifNotNil: [ :line | self emit: line ]
+	said ifNotNil: [ :line | self emit: line ]
 ]
 
 { #category : #recovery }
@@ -520,7 +545,11 @@ SoilQueue >> recoverOrphanedClaims [
 	the next start.
 
 	One orphan that cannot be given back does not keep the others waiting. It is reported
-	like any failed step and stays claimed, and the next start tries it again."
+	like any failed step and stays claimed, and the next start tries it again.
+
+	How many there are is said before they go back, when there are any: each one is said
+	again as it goes back or is parked, and the count is what tells those lines from the
+	ones of a step that failed"
 
 	| orphans |
 	recovered ifTrue: [ ^ self ].
@@ -530,6 +559,9 @@ SoilQueue >> recoverOrphanedClaims [
 		(self workspaceIn: txn) keysAndEntriesDo: [ :key :entry |
 			(entry isClaimed and: [ (self isHolding: key) not ])
 				ifTrue: [ orphans add: key ] ] ].
+	orphans ifNotEmpty: [
+		self emit: 'found ' , (self count: orphans size of: 'claim')
+			, ' that nobody holds, left behind by the run before' ].
 	orphans do: [ :each |
 		[ self recover: each ]
 			on: Error
@@ -705,7 +737,10 @@ SoilQueue >> work: aKey [
 
 	A work unit that fails at its work is booked afterwards, outside the loop: a conflict in
 	the bookkeeping must not run the work again at once. It gets out of the step, and the
-	entry goes back the way an orphan goes back."
+	entry goes back the way an orphan goes back.
+
+	A run again is said: whatever the work unit says about itself, it said once for each
+	attempt, and only one of them counted"
 
 	| attempts failure |
 	attempts := 0.
@@ -715,6 +750,9 @@ SoilQueue >> work: aKey [
 		on: SoilObjectHasConcurrentChange
 		do: [ :aConflict |
 			attempts >= self conflictLimit ifTrue: [ aConflict pass ].
+			self emit: 'a concurrent change got in the way of a work unit, running it again (attempt '
+				, (attempts + 1) printString , ' of ' , self conflictLimit printString , '): '
+				, aConflict messageText asString.
 			false ] ]
 		whileFalse.
 	failure ifNotNil: [ self book: failure for: aKey ]
