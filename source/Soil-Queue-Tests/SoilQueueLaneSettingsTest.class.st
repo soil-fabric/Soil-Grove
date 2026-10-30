@@ -137,6 +137,20 @@ SoilQueueLaneSettingsTest >> testARefusedSettingThatIsProceededIsNotStored [
 ]
 
 { #category : #tests }
+SoilQueueLaneSettingsTest >> testALaneTakesItsOwnBackoffCap [
+
+	| queue |
+	self configure: [ :description |
+		description
+			backoffCap: 10 minutes;
+			backoffCap: 1 minute forLane: #b ].
+	queue := self queue.
+
+	self assert: (queue lane: #b) backoffCap equals: 1 minute.
+	self assert: (queue lane: #c) backoffCap equals: 10 minutes
+]
+
+{ #category : #tests }
 SoilQueueLaneSettingsTest >> testALaneTakesItsOwnWorkerLimit [
 
 	| queue |
