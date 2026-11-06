@@ -109,10 +109,10 @@ SoilQueueCrashTest >> entryAt: aKey do: aBlock [
 
 { #category : #helpers }
 SoilQueueCrashTest >> idOf: aKey [
-	"the eight bytes that tell an entry apart, in the key it was put in under: the due time
-	comes first, then the id"
+	"the eight bytes that tell an entry apart, in the key it was put in under: the lane's
+	marker comes first, then the due time, then the id"
 
-	^ (aKey asByteArrayOfSize: 24) copyFrom: 9 to: 16
+	^ (aKey asByteArrayOfSize: 24) copyFrom: 10 to: 17
 ]
 
 { #category : #helpers }

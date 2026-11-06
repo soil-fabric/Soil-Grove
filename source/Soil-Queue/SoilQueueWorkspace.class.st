@@ -21,9 +21,17 @@ goes where the format says (#scanFrom:to:do:), and never ask which kind of forma
 has.
 
 How wide the marker is, is decided when I am created, and with it how many lanes I can
-hold: none wide means one lane over the whole index, one byte means up to 256. A lane
-comes in by #addLaneNamed:format:, and I hand out its marker -- the lowest free one. No
-lane goes out again.
+hold: one byte means up to 255. A lane comes in by #addLaneNamed:format:, and I hand out
+its marker -- the lowest free one. No lane goes out again. A marker of no width is
+refused: there would be no section left for the dead letters.
+
+The dead letters lie on the same index, in a section of their own behind the highest
+marker, which no lane is given. A parked entry's key there is that marker followed by the
+key it had in its lane, without as many padding bytes at the end as the marker takes --
+so the lane still stands in it, and #deadLettersDo: hands the old key on. That is why a
+lane's keys have to leave room for two markers (#addLaneNamed:format:). Nothing that looks
+for work comes there: every scan for work jumps to the start of its lane's section and
+stops where it ends.
 "
 Class {
 	#name : #SoilQueueWorkspace,
@@ -31,15 +39,26 @@ Class {
 	#instVars : [
 		'index',
 		'keySize',
-		'lanes',
-		'deadLetters'
+		'lanes'
 	],
 	#category : #'Soil-Queue'
 }
 
+{ #category : #checking }
+SoilQueueWorkspace class >> checkRoomFor: aFormat behind: widthInBytes in: keySizeInBytes [
+	"refuse a lane whose keys would not fit twice behind a marker: once in its own section,
+	and once parked, where the dead letters' marker goes in front and as many bytes come off
+	the end -- bytes that have to be padding, or the old key could not be read back"
+
+	aFormat partsSize > (keySizeInBytes - (2 * widthInBytes)) ifTrue: [
+		^ self error: 'keys of ' , aFormat partsSize printString
+			, ' bytes do not fit behind two markers of ' , widthInBytes printString
+			, ' in a key size of ' , keySizeInBytes printString ]
+]
+
 { #category : #'instance creation' }
 SoilQueueWorkspace class >> newIndexWithBackend: anIndexClass keySize: keySizeInBytes [
-	"an index the way both of mine are made: for my entries and for the dead letters.
+	"an index the way mine is made, for my entries and the dead letters alike.
 
 	The skip list level is set because Soil leaves it nil, and a nil one fails on the first
 	write with a message that says nothing about what is missing. 16 is what the one
@@ -54,29 +73,34 @@ SoilQueueWorkspace class >> newIndexWithBackend: anIndexClass keySize: keySizeIn
 { #category : #'instance creation' }
 SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes [
 	"the ordinary case: an index of my own with one lane, #default, ordered by due time,
-	with no marker and no byte paid for one -- and no room for a second lane"
+	behind a marker of one byte -- room for the dead letters and for more lanes"
 
 	^ self
 		timeOrderedWithBackend: anIndexClass
 		keySize: keySizeInBytes
-		markerWidth: 0
+		markerWidth: 1
 ]
 
 { #category : #'instance creation' }
 SoilQueueWorkspace class >> timeOrderedWithBackend: anIndexClass keySize: keySizeInBytes markerWidth: widthInBytes [
 	"an index of my own with one lane, #default, ordered by due time, behind a marker of
 	widthInBytes -- room for more lanes to be added, one per marker. Whether that room is
-	needed is decided here: the width shapes every key and cannot change later. The dead
-	letters get an index of the same kind and key size"
+	needed is decided here: the width shapes every key and cannot change later. A width of
+	0 is refused: the dead letters need a marker of their own"
 
+	| defaultFormat |
+	widthInBytes < 1 ifTrue: [
+		^ self error: 'a marker of ' , widthInBytes printString
+			, ' bytes leaves no section for the dead letters' ].
+	defaultFormat := SoilQueueTimeOrderedKeyFormat new.
+	self checkRoomFor: defaultFormat behind: widthInBytes in: keySizeInBytes.
 	^ self new
 		setIndex: (self newIndexWithBackend: anIndexClass keySize: keySizeInBytes)
-		deadLetters: (self newIndexWithBackend: anIndexClass keySize: keySizeInBytes)
 		keySize: keySizeInBytes
 		lanes: { SoilQueueLaneDescription
 			named: #default
 			range: (SoilPrefixRange prefix: 0 width: widthInBytes keySize: keySizeInBytes)
-			format: SoilQueueTimeOrderedKeyFormat new }
+			format: defaultFormat }
 ]
 
 { #category : #adding }
@@ -109,7 +133,11 @@ SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 	marker, so two lanes cannot collide on one, and a lane keeps its marker -- it is written
 	into every key of it. No lane is taken out again, so no marker is freed. A gap below the
 	last one -- in a workspace stored while lanes could still be taken out -- is filled
-	first, and nothing lies under it.
+	first, and nothing lies under it. The highest marker is never handed out: it is the
+	dead letters'.
+
+	Its keys have to fit behind two markers, so that a parked one still holds all of its
+	key (#checkRoomFor:behind:in:).
 
 	Stored with me, in the transaction I was read in; I do not commit"
 
@@ -117,11 +145,9 @@ SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 	(lanes anySatisfy: [ :each | each name = aSymbol ]) ifTrue: [
 		^ self error: 'there is a lane named ' , aSymbol printString , ' already' ].
 	width := self markerWidth.
-	aFormat partsSize > (keySize - width) ifTrue: [
-		^ self error: 'keys of ' , aFormat partsSize printString , ' bytes do not fit behind a marker of '
-			, width printString , ' in a key size of ' , keySize printString ].
+	self class checkRoomFor: aFormat behind: width in: keySize.
 	taken := (lanes collect: [ :each | each range prefix ]) asSet.
-	prefix := (0 to: (256 raisedTo: width) - 1)
+	prefix := (0 to: self deadLetterRange prefix - 1)
 		detect: [ :each | (taken includes: each) not ]
 		ifNone: [ ^ self error: 'no marker left for another lane, with markers '
 			, width printString , ' bytes wide' ].
@@ -135,28 +161,65 @@ SoilQueueWorkspace >> addLaneNamed: aSymbol format: aFormat [
 
 { #category : #accessing }
 SoilQueueWorkspace >> deadLetter: aKey [
-	"park an entry that could not be worked on at all, and take it out of the ordering.
+	"park an entry that could not be worked on at all, and take it out of the ordering:
+	into the dead letters' section of the same index, under its old key behind their
+	marker (#deadLetterKeyFor:). Answers that key.
 
-	Put first and removed second, so that an abort in between leaves it where it was rather
-	than nowhere. It keeps its key: it is the same entry, only somewhere else. It keeps its
-	claim too. Being here is what says it is parked, and the claim says when its last
-	attempt began; nobody hands out what lies here. Should one ever be taken back into the
-	ordering, it goes back unclaimed."
+	One move rather than a removal and an insertion, for the reason #moveKey:for: gives:
+	the entry is not read for it. It keeps its key, as far as anyone outside sees it -- it
+	is the same entry, only somewhere else, and #deadLettersDo: hands the old key on. It
+	keeps its claim too. Being here is what says it is parked, and the claim says when its
+	last attempt began; nobody hands out what lies here. Should one ever be taken back into
+	the ordering, it goes back unclaimed."
 
-	| entry |
-	entry := self entryAt: aKey.
-	deadLetters at: aKey put: entry.
-	self removeKey: aKey.
-	^ entry
+	| newKey |
+	newKey := self deadLetterKeyFor: aKey.
+	index moveKey: aKey to: newKey.
+	^ newKey
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> deadLetterKeyFor: aKey [
+	"where an entry under aKey lies once it is parked: the dead letters' marker, then the
+	key without as many bytes at its end as the marker takes. Those are padding -- a lane's
+	keys leave room for two markers (#addLaneNamed:format:) -- so nothing of the key is lost,
+	and its lane's marker stays in it"
+
+	| width bytes |
+	width := self markerWidth.
+	bytes := (aKey asIndexKeyOfSize: keySize) asByteArrayOfSize: keySize.
+	^ (self deadLetterRange keyWith: (bytes first: keySize - width))
+		asIndexKeyOfSize: keySize
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> deadLetterRange [
+	"the section the parked entries lie in: behind the highest marker there is, which no
+	lane is given. The highest, so that the lanes keep the markers counted up from 0 they
+	have always had"
+
+	| width |
+	width := self markerWidth.
+	^ SoilPrefixRange
+		prefix: (256 raisedTo: width) - 1
+		width: width
+		keySize: keySize
 ]
 
 { #category : #enumerating }
 SoilQueueWorkspace >> deadLettersDo: aBlock [
-	"the parked entries with their keys. Nobody is woken for these -- they are here to be
-	looked at"
+	"the parked entries with the keys they had in their lanes, in the order of those keys --
+	lane by lane, since the lane's marker comes first. Nobody is woken for these -- they are
+	here to be looked at"
 
-	deadLetters newIterator associationsDo: [ :each |
-		aBlock value: each key value: each value ]
+	| range |
+	range := self deadLetterRange.
+	self
+		scanFrom: range firstIndexKey
+		to: range lastIndexKey
+		do: [ :key :entryBlock |
+			aBlock value: (self keyBeforeDeadLetterKey: key) value: entryBlock value.
+			key + 1 ]
 ]
 
 { #category : #accessing }
@@ -199,17 +262,27 @@ SoilQueueWorkspace >> entryAt: aKey ifAbsent: aBlock [
 
 { #category : #initialization }
 SoilQueueWorkspace >> initializeIn: aTransaction [
-	"make the two indexes I was created with cluster roots of their own, once, when the
+	"make the index I was created with a cluster root of its own, once, when the
 	description I belong to is initialized -- after it has made me a root. An index is not
 	copied into my cluster; it is written page by page rather than with me.
 
-	The dead letters have the second one. Out of the ordering, so that a parked entry is
-	not stepped over on every scan for work, and still in the store, so that it can be
-	found and looked at -- work that disappears without a trace is worse than work that
-	sits there unfinished."
+	The dead letters lie on it too, in a section of their own (#deadLetterRange): out of
+	every lane, so that no scan for work comes across a parked entry, and still in the
+	store, so that it can be found and looked at -- work that disappears without a trace is
+	worse than work that sits there unfinished."
 
-	aTransaction makeRoot: index.
-	aTransaction makeRoot: deadLetters
+	aTransaction makeRoot: index
+]
+
+{ #category : #accessing }
+SoilQueueWorkspace >> keyBeforeDeadLetterKey: aDeadLetterKey [
+	"the key a parked entry had in its lane: the dead letters' marker taken off the front,
+	and the padding it pushed off the end put back"
+
+	| width bytes |
+	width := self markerWidth.
+	bytes := (aDeadLetterKey asByteArrayOfSize: keySize) allButFirst: width.
+	^ (bytes , (ByteArray new: width)) asIndexKeyOfSize: keySize
 ]
 
 { #category : #enumerating }
@@ -290,8 +363,8 @@ SoilQueueWorkspace >> lanes [
 
 { #category : #accessing }
 SoilQueueWorkspace >> markerWidth [
-	"how many bytes in front of every key tell the lanes apart -- the same for all of them,
-	so any lane answers it. Zero leaves room for one lane only"
+	"how many bytes in front of every key tell the lanes and the dead letters apart -- the
+	same for all of them, so any lane answers it. Never 0"
 
 	^ self defaultLane range width
 ]
@@ -402,8 +475,8 @@ SoilQueueWorkspace >> printOn: aStream [
 { #category : #removing }
 SoilQueueWorkspace >> removeKey: aKey [
 	"take an entry out of the ordering. Nothing is written on the entry for it: why it left
-	-- done, failed at its work, parked -- is not the entry's to say. A parked one lies in
-	the dead letters, and the others are gone"
+	-- done, failed at its work -- is not the entry's to say. Both are gone; a parked one
+	does not come this way but by #deadLetter:"
 
 	^ index removeKey: aKey
 ]
@@ -431,10 +504,9 @@ SoilQueueWorkspace >> scanFrom: aFirstIndexKey to: aLastIndexKey do: aBlock [
 ]
 
 { #category : #initialization }
-SoilQueueWorkspace >> setIndex: aSoilIndexedDictionary deadLetters: anotherSoilIndexedDictionary keySize: keySizeInBytes lanes: aCollection [
+SoilQueueWorkspace >> setIndex: aSoilIndexedDictionary keySize: keySizeInBytes lanes: aCollection [
 
 	index := aSoilIndexedDictionary.
-	deadLetters := anotherSoilIndexedDictionary.
 	keySize := keySizeInBytes.
 	lanes := aCollection asOrderedCollection
 ]

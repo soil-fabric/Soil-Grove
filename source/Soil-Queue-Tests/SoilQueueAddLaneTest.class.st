@@ -107,13 +107,44 @@ SoilQueueAddLaneTest >> tearDown [
 ]
 
 { #category : #tests }
-SoilQueueAddLaneTest >> testAWorkspaceWithoutMarkersHasNoRoomForASecondLane [
-	"its one lane has the whole index, so there is no section left to give"
+SoilQueueAddLaneTest >> testAWorkspaceWithoutMarkersIsRefused [
+	"its one lane would have the whole index, and there would be no section left for the
+	dead letters"
+
+	self
+		should: [ SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 0 ]
+		raise: Error
+]
+
+{ #category : #tests }
+SoilQueueAddLaneTest >> testAWorkspaceHasAMarkerByDefault [
 
 	| workspace |
 	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24.
-	self should: [ workspace addLaneNamed: #b format: self format ] raise: Error.
-	self assert: (workspace lanes collect: [ :each | each name ]) equals: #( #default )
+	self assert: workspace markerWidth equals: 1
+]
+
+{ #category : #tests }
+SoilQueueAddLaneTest >> testALaneWhoseKeysFitBehindOneMarkerButNotTwoIsRefused [
+	"twenty bytes of grouped key fit behind one marker in twenty-one, but not once more
+	behind the dead letters' marker"
+
+	| workspace |
+	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 21 markerWidth: 1.
+	self
+		should: [ workspace addLaneNamed: #groups format: SoilQueueGroupedKeyFormat new ]
+		raise: Error.
+	self assert: workspace lanes size equals: 1
+]
+
+{ #category : #tests }
+SoilQueueAddLaneTest >> testAWorkspaceWhoseDefaultLaneDoesNotFitTwiceIsRefused [
+	"sixteen bytes of time-ordered key behind two markers of one do not fit into
+	seventeen"
+
+	self
+		should: [ SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 17 markerWidth: 1 ]
+		raise: Error
 ]
 
 { #category : #tests }
@@ -225,7 +256,6 @@ SoilQueueAddLaneTest >> testAGapInTheMarkersIsFilledFirst [
 	| workspace |
 	workspace := SoilQueueWorkspace new
 		setIndex: (SoilQueueWorkspace newIndexWithBackend: SoilSkipList keySize: 24)
-		deadLetters: (SoilQueueWorkspace newIndexWithBackend: SoilSkipList keySize: 24)
 		keySize: 24
 		lanes: {
 			SoilQueueLaneDescription
@@ -242,12 +272,13 @@ SoilQueueAddLaneTest >> testAGapInTheMarkersIsFilledFirst [
 
 { #category : #tests }
 SoilQueueAddLaneTest >> testAPrefixSpaceRunsFull [
-	"one byte of marker is room for 256 lanes, #default included"
+	"one byte of marker is room for 255 lanes, #default included -- the highest marker is
+	the dead letters'"
 
 	| workspace |
 	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 24 markerWidth: 1.
-	1 to: 255 do: [ :i | workspace addLaneNamed: ('lane' , i printString) asSymbol format: self format ].
-	self assert: workspace lanes last range prefix equals: 255.
+	1 to: 254 do: [ :i | workspace addLaneNamed: ('lane' , i printString) asSymbol format: self format ].
+	self assert: workspace lanes last range prefix equals: 254.
 	self should: [ workspace addLaneNamed: #oneTooMany format: self format ] raise: Error
 ]
 

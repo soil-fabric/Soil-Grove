@@ -11,9 +11,9 @@ a dead letter is parked and can still be looked at, a finished entry is done wit
 On a lane that lets an entry come back once, and without a wait, so that a test can drive
 an entry to its dead letter straight through.
 
-Parked means out of the working ordering and into a store of its own. Out, so that it is
-not stepped over on every scan for work; into, so that work does not disappear without a
-trace.
+Parked means out of the working ordering and into a section of its own on the same
+index, behind the highest marker. Out, so that no scan for work comes across it; into, so
+that work does not disappear without a trace.
 "
 Class {
 	#name : #SoilQueueDeadLetterTest,
@@ -46,10 +46,10 @@ SoilQueueDeadLetterTest >> descriptionIn: aTransaction [
 
 { #category : #helpers }
 SoilQueueDeadLetterTest >> idOf: aKey [
-	"the eight bytes that tell an entry apart, in the key it was put in under: the due time
-	comes first, then the id"
+	"the eight bytes that tell an entry apart, in the key it was put in under: the lane's
+	marker comes first, then the due time, then the id"
 
-	^ (aKey asByteArrayOfSize: 24) copyFrom: 9 to: 16
+	^ (aKey asByteArrayOfSize: 24) copyFrom: 10 to: 17
 ]
 
 { #category : #accessing }
@@ -163,6 +163,41 @@ SoilQueueDeadLetterTest >> testADeadLetterIsParkedWhereItCanBeFound [
 
 	self assert: (self stateOf: key) equals: nil.
 	self assert: self deadLetters equals: { self idOf: key }
+]
+
+{ #category : #tests }
+SoilQueueDeadLetterTest >> testADeadLetterIsHandedOnUnderTheKeyItHadInItsLane [
+	"parked behind the dead letters' marker, it is still read back under its old key -- the
+	one that says its lane"
+
+	| key txn letters |
+	key := self put: (SoilQueueTestUnreachableEntry on: 'gone').
+	txn := soil newTransaction.
+	[ (self workspaceIn: txn) deadLetter: key.
+	  txn commit ] ensure: [ txn isAborted ifFalse: [ txn abort ] ].
+
+	txn := soil newTransaction.
+	letters := OrderedCollection new.
+	[ | workspace |
+	  workspace := self workspaceIn: txn.
+	  workspace deadLettersDo: [ :each :entry | letters add: each ].
+	  self assert: letters asArray equals: { key }.
+	  self assert: (workspace laneFor: key) name equals: #default ]
+		ensure: [ txn abort ]
+]
+
+{ #category : #tests }
+SoilQueueDeadLetterTest >> testADeadLetterLiesBehindTheHighestMarker [
+	"in the same index as the work, in the section no lane is given"
+
+	| key txn |
+	key := self put: (SoilQueueTestUnreachableEntry on: 'gone').
+	txn := soil newTransaction.
+	[ | parked |
+	  parked := ((self workspaceIn: txn) deadLetter: key) asByteArrayOfSize: 24.
+	  self assert: parked first equals: 255.
+	  self assert: (parked copyFrom: 2 to: 24) equals: ((key asByteArrayOfSize: 24) first: 23) ]
+		ensure: [ txn abort ]
 ]
 
 { #category : #tests }
