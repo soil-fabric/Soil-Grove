@@ -128,9 +128,10 @@ SoilQueueWorkspaceTest >> testAKeyCarriesTheDueTimeInFrontOfTheId [
 	entry := self entryDueIn: 0 seconds.
 	key := description workspace defaultLane keyFor: entry in: description workspace.
 	self assert: key size equals: 24.
-	self assert: (key copyFrom: 9 to: 16) equals: entry id.
+	self assert: key first equals: 0.
+	self assert: (key copyFrom: 10 to: 17) equals: entry id.
 	self
-		assert: (key first: 8) asInteger
+		assert: (key copyFrom: 2 to: 9) asInteger
 		equals: (entry readyAt - DateAndTime unixEpoch) asMilliSeconds
 ]
 
@@ -232,7 +233,7 @@ SoilQueueWorkspaceTest >> testTheWorkspaceBringsItsShapeBackFromDisk [
 	self assert: (workspace lanes collect: [ :each | each name ]) equals: #( #default ).
 	self assert: workspace defaultLane format class equals: SoilQueueTimeOrderedKeyFormat.
 	self assert: workspace keySize equals: 24.
-	self assert: workspace defaultLane range width equals: 0.
+	self assert: workspace defaultLane range width equals: 1.
 	txn abort
 ]
 

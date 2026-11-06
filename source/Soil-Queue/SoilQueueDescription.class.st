@@ -22,8 +22,8 @@ Set to nil for a lane counts as set: a lane can go without a limit that holds fo
 the others. Kept by lane name, since the lanes themselves are the workspace's.
 
 The workspace is a cluster root of its own. I make it one in #initializeFrom:, which is
-where a description creates the objects its resident works on, and it makes the index
-and the dead letters roots in turn. That also spares the queue a trap: Soil sends
+where a description creates the objects its resident works on, and it makes its index a
+root in turn. That also spares the queue a trap: Soil sends
 #soilClusterRootIn: only out of #makeRoot:, never to an object it promotes on its own
 because the class says #isSoilClusterRoot -- so an index that only ever arrived by
 reference would be stored with no transaction at all.
@@ -137,7 +137,7 @@ SoilQueueDescription >> checkWorkerLimit: anInteger [
 SoilQueueDescription >> initializeFrom: aTransaction [
 	"my workspace is a cluster root of its own -- that is what gives it the id the queue
 	reaches it by, without reading me. Made a root first, then asked to make its own
-	roots, the index and the dead letters"
+	root, the index"
 
 	aTransaction makeRoot: workspace.
 	workspace initializeIn: aTransaction

@@ -144,15 +144,34 @@ SoilQueueGroupedLaneTest >> testAKeyCarriesTheGroupThenItsPlaceInItThenTheId [
 
 { #category : #tests }
 SoilQueueGroupedLaneTest >> testALaneWhoseKeysDoNotFitIsRefused [
-	"twenty bytes of grouped key behind a marker of one do not fit into sixteen, and that
-	is said when the lane comes in rather than when its first entry does"
+	"twenty bytes of grouped key behind two markers of one do not fit into twenty-one, and
+	that is said when the lane comes in rather than when its first entry does"
 
 	| workspace |
-	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 16 markerWidth: 1.
+	workspace := SoilQueueWorkspace timeOrderedWithBackend: SoilSkipList keySize: 21 markerWidth: 1.
 	self
 		should: [ workspace addLaneNamed: #groups format: SoilQueueGroupedKeyFormat new ]
 		raise: Error.
 	self assert: workspace lanes size equals: 1
+]
+
+{ #category : #tests }
+SoilQueueGroupedLaneTest >> testAParkedEntryKeepsAllOfItsKey [
+	"twenty bytes of grouped key behind a marker in twenty-four: parked behind the dead
+	letters' marker as well, nothing of it comes off, and it is read back as it was"
+
+	| key txn letters |
+	key := self put: (self entryIn: 7).
+	self inTransaction: [ :t | (self workspaceIn: t) deadLetter: key ].
+	self assert: self keysOfGroupsLane isEmpty.
+	txn := soil newTransaction.
+	letters := OrderedCollection new.
+	[ | workspace |
+	  workspace := self workspaceIn: txn.
+	  workspace deadLettersDo: [ :each :entry | letters add: each ].
+	  self assert: letters asArray equals: { key }.
+	  self assert: (workspace laneFor: key) name equals: #groups ]
+		ensure: [ txn abort ]
 ]
 
 { #category : #tests }
