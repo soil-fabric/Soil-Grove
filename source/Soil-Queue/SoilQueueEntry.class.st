@@ -56,9 +56,13 @@ exactly once.
 I count how often I was given back: #orphanedRetries, once for each time I was found
 claimed with no worker holding me -- my worker went away, a crash, a deploy, a rolling
 release, or something around my work unit failed: a commit that did not go through, a
-record that could not be read. It is not a count of attempts: a claim is taken for every
-attempt, the first one included. A failure *at* my work is not counted at all. It is a
-result: my target hears of it (#giveUp:in:), and I am done.
+record that could not be read. My work unit can ask for the same: it answers #retry when
+my step did not go through for a reason outside it -- a far side that refused, one that
+did not answer -- and I am given back and counted as though my worker had gone away. The
+name says where the count began; what it counts is the times I was given back. It is not
+a count of attempts: a claim is taken for every attempt, the first one included. A
+failure *at* my work is not counted at all. It is a result: my target hears of it
+(#giveUp:in:), and I am done.
 
 The count is of times in a row: a step of mine that goes through sets it back to nothing.
 What it is read for -- the wait before the next try, and the limit of my lane -- is about
@@ -220,9 +224,9 @@ SoilQueueEntry >> isPending [
 
 { #category : #accessing }
 SoilQueueEntry >> noteOrphaned [
-	"my worker went away while I was claimed, or my step failed around my work unit, and I
-	am about to be given back. Counted here, at the one moment the queue learns of it, and
-	not at the claim"
+	"my worker went away while I was claimed, my step failed around my work unit, or my work
+	unit answered #retry, and I am about to be given back. Counted here, at the one moment
+	the queue learns of it, and not at the claim"
 
 	orphanedRetries := orphanedRetries + 1
 ]
@@ -242,9 +246,9 @@ SoilQueueEntry >> noteStepDone [
 
 { #category : #accessing }
 SoilQueueEntry >> orphanedRetries [
-	"how often in a row I was found claimed with no worker holding me and was given back,
-	since my last step that went through: the image went away, a deploy, a rolling release,
-	a step that failed around my work unit rather than at it"
+	"how often in a row I was given back without finishing my step, since my last step that
+	went through: the image went away, a deploy, a rolling release, a step that failed around
+	my work unit rather than at it, a work unit that answered #retry"
 
 	^ orphanedRetries
 ]
@@ -252,10 +256,16 @@ SoilQueueEntry >> orphanedRetries [
 { #category : #working }
 SoilQueueEntry >> performIn: aTransaction [
 	"do one work unit in the transaction the queue opened, and answer what comes next:
-	#more or #finished. A unit that has put a failure of its target on the target itself
-	answers #finished too: that is my end, and the target carries the failure. One that
-	throws fails at its work and is given up on (#giveUp:in:), or is given back when the
-	error is Soil's (SoilQueue>>#workOnce:).
+	#more, #finished or #retry. A unit that has put a failure of its target on the target
+	itself answers #finished too: that is my end, and the target carries the failure. One
+	that throws fails at its work and is given up on (#giveUp:in:), or is given back when
+	the error is Soil's (SoilQueue>>#workOnce:).
+
+	#retry is for a step that did not go through for a reason outside the work -- a far
+	side that refused or did not answer. What the unit wrote is discarded with the
+	transaction, and I am given back the way an orphan is: counted, after a wait by the
+	curve of my lane, parked at its limit (SoilQueue>>#work:). Not a due time I set myself:
+	the wait and the limit are my lane's.
 	No commit of my own -- the result, the index removal and any follow-up entry belong in
 	the queue's single commit, so that the state where the work wants to go on and no entry
 	is left cannot arise.

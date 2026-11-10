@@ -237,8 +237,9 @@ SoilQueue >> book: anError for: aKey [
 	(#giveUp:in:), and leaves the ordering -- which is all that done is.
 
 	A failure at the work is a result. It is not tried again and not parked: a retry a far
-	side would want is the entry's own business, a due time it sets itself, and a dead
-	letter is kept for an entry that keeps coming back -- see #recover:.
+	side would want is the entry's to ask for -- its work unit answers #retry rather than
+	throwing, and it goes back through #recover: (#work:) -- and a dead letter is kept for
+	an entry that keeps coming back.
 
 	The error is kept for diagnosis. It is not counted as a step error: that count is what
 	shows a crash loop, and a failure that was handled is none. It is said, in a line once
@@ -482,9 +483,11 @@ SoilQueue >> recover: aKey [
 	from coming back. An entry that throws here stays claimed and is tried again at the
 	next start, which is the right answer while the hook has no dead-lettering of its own.
 
-	This is the one moment the queue learns that a worker went away, so it is where that is
-	counted. An entry that has lost its worker as often in a row as its lane allows is not
-	given back but parked: whatever took the worker with it would take the next one too.
+	This is the one moment the queue learns that a worker went away, or that a work unit did
+	not get its step through for a reason outside it and asked to be tried again (#retry,
+	see #work:), so it is where that is counted. An entry that has not finished its step as
+	often in a row as its lane allows is not given back but parked: whatever kept it from
+	finishing would keep the next attempt from it too.
 
 	An entry that is given back waits first, by the curve of its lane: what took its worker
 	away -- a commit that does not go through, a segment that is not
@@ -497,8 +500,9 @@ SoilQueue >> recover: aKey [
 	letter is for somebody to look at, and nobody is woken for it, and an entry that keeps
 	coming back after a wait is otherwise seen only once it is parked. The line is made
 	while the transaction is open, because the entry is read in it. It says that the entry
-	did not finish its step, which holds for both ways here: its worker went away, or the
-	step failed around its work unit (#stepFailed:on:)"
+	did not finish its step, which holds for all three ways here: its worker went away, the
+	step failed around its work unit (#stepFailed:on:), or the work unit asked to be tried
+	again (#work:)"
 
 	| said |
 	self withTransactionDo: [ :txn |
@@ -745,15 +749,22 @@ SoilQueue >> work: aKey [
 	the bookkeeping must not run the work again at once. It gets out of the step, and the
 	entry goes back the way an orphan goes back.
 
+	A work unit that answers #retry did not get its step through for a reason outside it --
+	a far side that refused, one that did not answer. That is no statement about the work,
+	so the entry goes back the way an orphan goes back (#recover:): counted, after a wait
+	by the curve of its lane, parked at the lane's limit. Also outside the loop, like a
+	booking. It is no step error: nothing in the queue broke, and the count of step errors
+	is what shows a crash loop.
+
 	A run again is said: whatever the work unit says about itself, it said once for each
 	attempt, and only one of them counted. Said after the handler is done and not in it: a
 	handler runs on top of the commit that met the conflict, which still holds the lock of
 	the database, and every commit of it would wait for the line"
 
-	| attempts failure conflict |
+	| attempts outcome conflict |
 	attempts := 0.
 	[ attempts := attempts + 1.
-	  [ failure := self workOnce: aKey.
+	  [ outcome := self workOnce: aKey.
 	    true ]
 		on: SoilObjectHasConcurrentChange
 		do: [ :aConflict |
@@ -763,7 +774,8 @@ SoilQueue >> work: aKey [
 		whileFalse: [
 			self emit: 'a concurrent change got in the way of a work unit, running it again (attempt '
 				, (attempts + 1) printString , ' of ' , self conflictLimit printString , '): ' , conflict ].
-	failure ifNotNil: [ self book: failure for: aKey ]
+	outcome == #retry ifTrue: [ ^ self recover: aKey ].
+	outcome ifNotNil: [ self book: outcome for: aKey ]
 ]
 
 { #category : #running }
@@ -801,13 +813,17 @@ SoilQueue >> workOnce: aKey [
 	"one attempt at the work unit, and what follows from what it answers, in one commit.
 
 	#more gives the claim back, and the entry stays in the ordering under the key its due
-	time now asks for. Anything else is the end of the entry: it leaves the ordering, and
+	time now asks for. Anything else but #retry (below) is the end of the entry: it leaves the ordering, and
 	nothing is written on it on the way out. A work unit that says 'again, but later' has
 	moved its #readyAt. On a lane ordered by due time the key is what sorts by it -- left
 	where it was, the entry would be handed out again at once; a grouped lane keeps the key
 	and reads the time off the entry. The move goes with the result into the same commit,
 	and it never reads the target: only the reference travels. An entry that did not move
 	its due time keeps its key and is due again immediately.
+
+	#retry says that the step did not go through, for a reason outside the work unit. The
+	transaction is discarded as for a failure, nothing of the step is kept, and I answer
+	#retry, so that #work: gives the entry back through #recover:.
 
 	Two ways for the work unit to fail, told apart by the class of the error. One that is
 	neither a SoilError nor a SoilSerializerError -- Soil's own two kinds, the serializer's
@@ -829,6 +845,7 @@ SoilQueue >> workOnce: aKey [
 		outcome := [ entry performIn: txn ]
 			on: Error - SoilError - SoilSerializerError
 			do: [ :anError | ^ anError ].
+		outcome == #retry ifTrue: [ ^ #retry ].
 		outcome == #more
 			ifTrue: [
 				entry releaseClaim.
