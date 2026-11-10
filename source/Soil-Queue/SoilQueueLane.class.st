@@ -44,7 +44,9 @@ SoilQueueLane class >> named: aSymbol configuredFrom: aDescription [
 
 { #category : #retrying }
 SoilQueueLane >> allowsOrphanedRetryOf: anEntry [
-	"whether an entry that lost its worker may be given back once more. The limit reads
+	"whether an entry that did not finish its step -- it lost its worker, its step failed
+	around its work unit, or its work unit answered #retry -- may be given back once more.
+	The limit reads
 	like the restart limit of a resident: with a limit of two, an entry orphaned twice in a
 	row comes back both times and the third orphaning is the one that parks it. Unlike a
 	resident's restarts the count is of times in a row: a step of the entry that goes

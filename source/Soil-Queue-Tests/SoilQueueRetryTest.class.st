@@ -12,6 +12,9 @@ through, a conflict that does not resolve -- leaves the entry claimed with no wo
 holding it, and it goes back the way an orphan goes back: counted, after a wait by the
 curve of its lane, parked at the lane's limit.
 
+A work unit can ask for that way itself: it answers #retry when its step did not go
+through for a reason outside it, a far side that refused.
+
 Driven on a clock that stands still until it is moved, so that a backoff is a statement
 about time rather than a wait.
 "
@@ -29,6 +32,18 @@ Class {
 SoilQueueRetryTest >> descriptionIn: aTransaction [
 
 	^ (soil residentRegistryIn: aTransaction) descriptionNamed: #queue
+]
+
+{ #category : #helpers }
+SoilQueueRetryTest >> deadLetterCount [
+
+	| txn |
+	txn := soil newTransaction.
+	^ [ | count |
+	  count := 0.
+	  (self workspaceIn: txn) deadLettersDo: [ :key :entry | count := count + 1 ].
+	  count ]
+		ensure: [ txn abort ]
 ]
 
 { #category : #helpers }
@@ -188,7 +203,7 @@ SoilQueueRetryTest >> testAFailureIsRememberedButCountsAsNoStepError [
 { #category : #tests }
 SoilQueueRetryTest >> testAFailureAtTheWorkGivesUpAtOnce [
 	"nothing is retried that nobody thought through. A retry a far side would want is the
-	entry's own business, a due time it sets itself"
+	entry's to ask for, by answering #retry instead of throwing"
 
 	self put: [ :target | SoilQueueTestBrokenEntry on: target ].
 	(SoilQueueWorker on: self queue) runOnce.
@@ -270,6 +285,48 @@ SoilQueueRetryTest >> testAnEntryThatKeepsFailingOutsideItsWorkUnitIsParkedAtThe
 	self assert: self onlyEntry first equals: #pending.
 	worker runOnce.
 	self assert: self onlyEntry isNil
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryThatAsksToBeTriedAgainIsGivenBackAndWaits [
+	"a far side that refused is no statement about the work, and often answers a while
+	later. The work unit says so with #retry, and the entry goes back the way an orphan goes
+	back: counted, after a wait by the curve of its lane. What the step wrote goes with its
+	transaction, and it is no step error -- nothing in the queue broke"
+
+	| queue |
+	self put: [ :target | SoilQueueTestRefusedEntry on: target ].
+	queue := self queue.
+	(SoilQueueWorker on: queue) runOnce.
+
+	self
+		assert: self onlyEntry
+		equals: { #pending. clock now + 1 second. 1 }.
+	self assert: self targetEffects isEmpty.
+	self assert: queue stepErrorCount equals: 0.
+	self assert: self deadLetterCount equals: 0
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryThatKeepsAskingToBeTriedAgainIsParkedAtTheLimit [
+	"the limit of its lane, the same as for a lost worker: to the queue both are a step that
+	did not finish"
+
+	| queue worker |
+	self inTransaction: [ :txn |
+		(self descriptionIn: txn) orphanedRetryLimit: 2 ].
+	self put: [ :target | SoilQueueTestRefusedEntry on: target ].
+	queue := self queue.
+	worker := SoilQueueWorker on: queue.
+	2 timesRepeat: [
+		worker runOnce.
+		clock advanceBy: 1 hour ].
+	self assert: self onlyEntry first equals: #pending.
+
+	worker runOnce.
+	self assert: self onlyEntry isNil.
+	self assert: self deadLetterCount equals: 1.
+	self assert: queue stepErrorCount equals: 0
 ]
 
 { #category : #tests }
