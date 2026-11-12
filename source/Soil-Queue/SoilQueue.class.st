@@ -250,7 +250,8 @@ SoilQueue >> book: anError for: aKey [
 	self withTransactionDo: [ :txn |
 		| workspace entry |
 		workspace := self workspaceIn: txn.
-		entry := workspace entryAt: aKey.
+		entry := workspace entryAt: aKey ifAbsent: [ nil ].
+		entry ifNil: [ self noteRemoved: aKey. ^ self ].
 		entry giveUp: anError in: txn.
 		said := 'gave up an entry of lane ' , (self laneFor: aKey in: workspace) name printString
 			, ' that failed at its work (' , anError class name , ': ' , anError messageText asString
@@ -265,11 +266,20 @@ SoilQueue >> claim: aKey [
 	"step 2 of a work unit: its own short transaction, committed before the work starts.
 	Its only purpose is the crash case -- an entry found as claimed with no worker running
 	was in the middle of something. It is not the mutual exclusion; under MVCC a claim
-	written here is invisible to a transaction that is already open elsewhere."
+	written here is invisible to a transaction that is already open elsewhere.
+
+	Answers whether it claimed. The key was handed out in a transaction of its own, and the
+	entry can have been removed since (a withdrawn scheduled operation, say): then there is
+	nothing to claim and nothing to work, which is no fault of the queue and is no step
+	error. It is said in a line, and the worker does not go on to #work:"
 
 	self withTransactionDo: [ :txn |
-		((self workspaceIn: txn) entryAt: aKey) claimAt: self now.
-		txn commit ]
+		| entry |
+		entry := (self workspaceIn: txn) entryAt: aKey ifAbsent: [ nil ].
+		entry ifNil: [ ^ self noteRemoved: aKey ].
+		entry claimAt: self now.
+		txn commit ].
+	^ true
 ]
 
 { #category : #accessing }
@@ -508,7 +518,8 @@ SoilQueue >> recover: aKey [
 	self withTransactionDo: [ :txn |
 		| workspace entry lane |
 		workspace := self workspaceIn: txn.
-		entry := workspace entryAt: aKey.
+		entry := workspace entryAt: aKey ifAbsent: [ nil ].
+		entry ifNil: [ self noteRemoved: aKey. ^ self ].
 		entry isClaimed ifFalse: [ ^ self ].
 		entry resumeAfterAbortIn: txn.
 		lane := self laneFor: aKey in: workspace.
@@ -576,6 +587,17 @@ SoilQueue >> recoverOrphanedClaims [
 		[ self recover: each ]
 			on: Error
 			do: [ :anError | self handleStepError: anError ] ]
+]
+
+{ #category : #working }
+SoilQueue >> noteRemoved: aKey [
+	"the entry at aKey was removed between two of the transactions of a step, which share
+	nothing but the key. That is not an error of the queue, so it is not counted as one: the
+	step ends there, and this says so in a line, once for each entry skipped. Answers false,
+	for #claim:"
+
+	self emit: 'entry ' , aKey printString , ' was removed meanwhile, skipped'.
+	^ false
 ]
 
 { #category : #working }
@@ -836,12 +858,14 @@ SoilQueue >> workOnce: aKey [
 	claimed, goes back the way an orphan goes back, after a wait, and is parked when its
 	lane allows no more (#stepFailed:on:). Only the work unit is watched like this: an
 	error from the bookkeeping around it or from the commit passes too, whatever its class.
-	Otherwise I answer nil."
+	Otherwise I answer nil -- also when the entry is no longer there: it was removed since
+	the claim, there is nothing to book, and #noteRemoved: says so."
 
 	self withTransactionDo: [ :txn |
 		| workspace entry outcome |
 		workspace := self workspaceIn: txn.
-		entry := workspace entryAt: aKey.
+		entry := workspace entryAt: aKey ifAbsent: [ nil ].
+		entry ifNil: [ self noteRemoved: aKey. ^ nil ].
 		outcome := [ entry performIn: txn ]
 			on: Error - SoilError - SoilSerializerError
 			do: [ :anError | ^ anError ].
