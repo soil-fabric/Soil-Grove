@@ -153,6 +153,14 @@ SoilQueueRetryTest >> runOnceWithin: aNumberOfSeconds on: aQueue [
 	^ false
 ]
 
+{ #category : #helpers }
+SoilQueueRetryTest >> removeKey: aKey [
+	"what another process does to an entry the queue has handed out: take it out of the
+	ordering, in a transaction of its own"
+
+	self inTransaction: [ :txn | (self workspaceIn: txn) removeKey: aKey ]
+]
+
 { #category : #running }
 SoilQueueRetryTest >> setUp [
 
@@ -250,6 +258,95 @@ SoilQueueRetryTest >> testAnErrorOfSoilsSerializerFromTheWorkGivesTheEntryBack [
 		assert: self onlyEntry
 		equals: { #pending. clock now + 1 second. 1 }.
 	self assert: self targetEffects isEmpty
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryRemovedBeforeItsClaimIsSkipped [
+	"the key is handed out in one transaction and claimed in the next, and somebody else
+	removes the entry in the gap (a withdrawn scheduled operation). That is no fault of the
+	queue: nothing is claimed, nothing runs, no step error is counted, and the worker goes on
+	with the next entry that is due. It is said once"
+
+	| keys queue worker lines |
+	keys := OrderedCollection new.
+	keys add: (self put: [ :target | SoilQueueTestRepeatingEntry on: target ]).
+	clock advanceBy: 1 second.
+	keys add: (self put: [ :target | SoilQueueTestRepeatingEntry on: target ]).
+	queue := SoilQueueTestRemovingQueue from: self queue.
+	queue afterAssigning: [ :key | self removeKey: key ].
+	worker := SoilQueueWorker on: queue.
+
+	self assert: worker runOnce equals: keys first.
+	self assert: queue stepErrorCount equals: 0.
+	self assert: self targetEffects isEmpty.
+	self deny: (queue isHolding: keys first).
+	lines := soil reportedMatching: 'removed meanwhile'.
+	self assert: lines size equals: 1.
+	self assert: (lines first includesSubstring: keys first printString).
+
+	self assert: worker runOnce equals: keys last.
+	self assert: self targetEffects equals: #( #ran ).
+	self assert: queue stepErrorCount equals: 0.
+	self assert: (soil reportedMatching: 'removed meanwhile') size equals: 1
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryRemovedBetweenItsClaimAndItsWorkIsSkipped [
+	"the claim has committed and the entry is removed before the work opens its transaction:
+	the same as before the claim. The claim is the one thing that was written, and it went
+	with the entry"
+
+	| keys queue worker lines |
+	keys := OrderedCollection new.
+	keys add: (self put: [ :target | SoilQueueTestRepeatingEntry on: target ]).
+	clock advanceBy: 1 second.
+	keys add: (self put: [ :target | SoilQueueTestRepeatingEntry on: target ]).
+	queue := SoilQueueTestRemovingQueue from: self queue.
+	queue afterClaiming: [ :key | self removeKey: key ].
+	worker := SoilQueueWorker on: queue.
+
+	self assert: worker runOnce equals: keys first.
+	self assert: queue stepErrorCount equals: 0.
+	self assert: self targetEffects isEmpty.
+	self deny: (queue isHolding: keys first).
+	lines := soil reportedMatching: 'removed meanwhile'.
+	self assert: lines size equals: 1.
+	self assert: (lines first includesSubstring: keys first printString).
+
+	self assert: worker runOnce equals: keys last.
+	self assert: self targetEffects equals: #( #ran ).
+	self assert: queue stepErrorCount equals: 0.
+	self assert: (soil reportedMatching: 'removed meanwhile') size equals: 1
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryRemovedBeforeItIsBookedIsSkipped [
+	"booking a failure is a transaction of its own, after the one that failed. An entry that
+	is gone by then has nothing to give up, and no error comes of it"
+
+	| key queue |
+	key := self put: [ :target | SoilQueueTestBrokenEntry on: target ].
+	self removeKey: key.
+	queue := self queue.
+	queue book: (Error new messageText: 'the far side refused the request'; yourself) for: key.
+
+	self assert: queue stepErrorCount equals: 0.
+	self assert: (soil reportedMatching: 'removed meanwhile') size equals: 1
+]
+
+{ #category : #tests }
+SoilQueueRetryTest >> testAnEntryRemovedBeforeItIsGivenBackIsSkipped [
+	"giving an entry back looks it up again, which is what threw a second time and counted a
+	second step error. An entry that is gone is nothing to give back"
+
+	| key queue |
+	key := self put: [ :target | SoilQueueTestRepeatingEntry on: target ].
+	self removeKey: key.
+	queue := self queue.
+	queue recover: key.
+
+	self assert: queue stepErrorCount equals: 0.
+	self assert: (soil reportedMatching: 'removed meanwhile') size equals: 1
 ]
 
 { #category : #tests }

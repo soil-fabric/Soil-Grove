@@ -100,6 +100,9 @@ SoilQueueWorker >> runOnce [
 	back commits as well, and in the handler it would wait for that lock in my own process,
 	for ever, and every commit of the database with it.
 
+	An entry that was removed since it was handed out is not claimed and is not worked, and
+	no error comes of it: the queue says so, see SoilQueue>>#claim:.
+
 	The key I worked on last goes with the question for the next one: on a grouped lane
 	that is how I carry on with my own chain."
 
@@ -107,8 +110,7 @@ SoilQueueWorker >> runOnce [
 	key := queue assignNextIn: lane preferring: lastKey.
 	key ifNil: [ ^ nil ].
 	lastKey := key.
-	[ failure := [ queue claim: key.
-	    queue work: key.
+	[ failure := [ (queue claim: key) ifTrue: [ queue work: key ].
 	    nil ]
 		on: Error
 		do: [ :anError | anError ].
