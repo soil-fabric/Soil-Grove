@@ -36,6 +36,11 @@ Every lane has a worker limit, a count of places of its own; lanes share no plac
 Before I start a worker for a lane there has to be a place free under its limit -- if
 there is none, I start none and try again at the next wake.
 
+A lane can also have a gate (#gate:forLane:), which whoever embeds me connects: behaviour
+and not a setting, so it is not stored anywhere, and I hold it in memory by the name of the
+lane. It says how many entries may leave the lane right now, and is told when one has. I
+know nothing of what limits it; a lane without one lets out whatever is due.
+
 Three roles, and the point of them is what each may not do. I hand out, and that is the
 only place an entry is chosen. My process is the dispatcher: a step decides how many
 workers there should be and when to wake next, and does no work itself. A QueueWorker
@@ -56,7 +61,8 @@ Class {
 		'workers',
 		'clock',
 		'wakeAt',
-		'lanes'
+		'lanes',
+		'gates'
 	],
 	#category : #'Soil-Queue'
 }
@@ -95,7 +101,7 @@ SoilQueue class >> soilTransientInstVars [
 	inherited ones are taken from there and not repeated by hand: a forgotten one would drag
 	a process or a semaphore into a written graph"
 
-	^ super soilTransientInstVars , #( mutex inFlight recovered workers clock wakeAt lanes )
+	^ super soilTransientInstVars , #( mutex inFlight recovered workers clock wakeAt lanes gates )
 ]
 
 { #category : #adding }
@@ -202,11 +208,17 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTrans
 
 	Nothing goes out for a lane I no longer hand out from: a start builds my lanes anew, and
 	a worker of a lane from before it that is still running runs dry. The step its end
-	brings starts workers on the new ones."
+	brings starts workers on the new ones.
+
+	Nor for a lane whose gate is shut. Only when an entry is found is the gate told that one
+	has left (#take): a token is never used up while nothing is due. Both happen under the
+	mutex, so two workers never get the same one."
 
 	^ mutex critical: [
-		| workspace found |
+		| workspace found gate |
 		(lanes includes: aLane) ifFalse: [ ^ nil ].
+		gate := self gateFor: aLane name.
+		(gate allowanceAt: aDateAndTime) > 0 ifFalse: [ ^ nil ].
 		workspace := self workspaceIn: aTransaction.
 		found := workspace
 			nextDueAt: aDateAndTime
@@ -217,7 +229,8 @@ SoilQueue >> assignNextIn: aLane dueAt: aDateAndTime preferring: aKey in: aTrans
 			ifNone: [ nil ].
 		found ifNotNil: [
 			inFlight add: found.
-			aLane lastIssuedKey: found ].
+			aLane lastIssuedKey: found.
+			gate take ].
 		found ]
 ]
 
@@ -344,6 +357,28 @@ SoilQueue >> freePlacesIn: aLane [
 		workers count: [ :each | each lane name = aLane name ] ])
 ]
 
+{ #category : #lanes }
+SoilQueue >> gate: aGate forLane: aName [
+	"connect aGate to the lane of that name, before I am started or after: it is read at
+	every handing out, so it holds from the next one. Kept by the name and not on the live
+	lane, which a start builds anew -- a gate that went with it would be gone at the first
+	restart. Not stored: it is how the embedder limits the lane, and not a setting of the
+	queue. A lane that has none lets out whatever is due.
+
+	Not told what its lane is, and never asked about entries: only how many may leave now
+	(#allowanceAt:), when it can open again (#nextOpenAfter:) and that one has left (#take)"
+
+	mutex critical: [ gates at: aName put: aGate ]
+]
+
+{ #category : #lanes }
+SoilQueue >> gateFor: aName [
+	"the gate of the lane of that name -- one that is always open when nobody connected
+	one, so that no caller needs to ask whether there is a gate"
+
+	^ mutex critical: [ gates at: aName ifAbsent: [ SoilQueueGate new ] ]
+]
+
 { #category : #testing }
 SoilQueue >> hasLiveLanes [
 	"whether my lanes are built. A start builds them, and so does creating me on a
@@ -360,7 +395,8 @@ SoilQueue >> initialize [
 	inFlight := Set new.
 	workers := IdentitySet new.
 	recovered := false.
-	lanes := #(  )
+	lanes := #(  ).
+	gates := Dictionary new
 ]
 
 { #category : #testing }
@@ -659,6 +695,13 @@ SoilQueue >> startWorkersForWhatIsDue [
 	work does not hide the later time of another, and a lane with no place free is not read
 	at all. The workers are started after the read, outside its transaction.
 
+	A lane with a gate lets out no more than the gate allows right now, so the places that
+	count are the smaller number: no worker is started for an entry that would leave empty
+	handed. With the gate shut the lane is still read, for one entry: what is due waits for
+	the gate to open, and the dispatcher is awake then (#nextOpenAfter:); what is not due
+	yet wakes it at its time, but not before the gate may open. #nextDueTime does not take
+	the gate into account at all: it says when something is due, not when it may leave.
+
 	The lanes and the keys that are out are taken before the transaction opens. Soil fixes
 	what a transaction sees when it opens, and a lane is added to the workspace first and
 	to my lanes second: taken in this order, every lane I read is one the transaction sees."
@@ -680,16 +723,26 @@ SoilQueue >> startWorkersForWhatIsDue [
 				free > 0
 					ifFalse: [ earliest ]
 					ifTrue: [
+						| gate allowance |
+						gate := self gateFor: lane name.
+						allowance := gate allowanceAt: now.
 						workspace
 							dueAt: now
 							in: (workspace laneNamed: lane name)
 							skipping: held
-							upTo: free
+							upTo: (free min: (allowance max: 1))
 							do: [ :count :next |
-								wanted add: lane -> count.
-								(next isNil or: [ earliest notNil and: [ earliest <= next ] ])
+								| wake |
+								wanted add: lane -> (count min: allowance).
+								wake := self
+									wakeTimeUnder: gate
+									allowance: allowance
+									due: count
+									next: next
+									at: now.
+								(wake isNil or: [ earliest notNil and: [ earliest <= wake ] ])
 									ifTrue: [ earliest ]
-									ifFalse: [ next ] ] ] ] ].
+									ifFalse: [ wake ] ] ] ] ].
 	wakeAt := time.
 	wanted do: [ :each | each value timesRepeat: [ self startWorkerFor: each key ] ]
 ]
@@ -755,6 +808,26 @@ SoilQueue >> wakeAt [
 	old one and setting the new one"
 
 	^ wakeAt
+]
+
+{ #category : #waking }
+SoilQueue >> wakeTimeUnder: aGate allowance: anInteger due: aCount next: aTime at: aDateAndTime [
+	"when a lane asks the dispatcher to be awake, from what one read of it found: how many
+	entries are due (aCount, never more than the read was asked for) and when the next one
+	after them falls due (aTime, or nil).
+
+	With an allowance that is aTime, as without a gate: what is due is for the workers
+	that are started. With the gate shut, due work cannot start anything, and nobody is
+	running for it to wake the dispatcher when they end -- so the time the gate opens is
+	the time, or nil when it cannot say. Nothing due, the next entry is at its own time, but
+	not before the gate may open"
+
+	anInteger > 0 ifTrue: [ ^ aTime ].
+	aCount > 0 ifTrue: [ ^ aGate nextOpenAfter: aDateAndTime ].
+	aTime ifNil: [ ^ nil ].
+	^ (aGate nextOpenAfter: aDateAndTime)
+		ifNil: [ aTime ]
+		ifNotNil: [ :open | aTime max: open ]
 ]
 
 { #category : #working }
